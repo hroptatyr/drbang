@@ -65,6 +65,7 @@ libdrbang_a_SOURCES += version.c version.h
 noinst_PROGRAMS += dbn
 dbn_SOURCES = dbn-test.c
 dbn_CPPFLAGS = $(AM_CPPFLAGS)
+dbn_CPPFLAGS += -D_GNU_SOURCE
 dbn_LDFLAGS = $(AM_LDFLAGS)
 dbn_LDFLAGS += -static
 dbn_LDADD = libdrbang.a

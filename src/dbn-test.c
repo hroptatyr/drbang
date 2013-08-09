@@ -386,26 +386,96 @@ out:
 }
 
 
-static uint8_t*
-read_tf(const int fd, dl_rbm_t m)
+/* sparse integer vectors */
+typedef struct spsc_s spsc_t;
+typedef struct spsv_s spsv_t;
+
+struct spsc_s {
+	size_t i;
+	uint8_t v;
+};
+
+struct spsv_s {
+	size_t z;
+	spsc_t *v;
+};
+
+static spsv_t
+read_tf(const int fd)
 {
-	uint8_t *v;
-	uint8_t *vp;
-	size_t vz;
+	static char *line;
+	static size_t llen;
+	static struct spsc_s *spsv;
+	static size_t spsz;
+	ssize_t nrd;
+	size_t i = 0U;
+
+	if (UNLIKELY(fd < 0)) {
+		if (line != NULL) {
+			free(line);
+		}
+		if (spsv != NULL) {
+			free(spsv);
+		}
+		return (spsv_t){.z = 0U, .v = NULL};
+	}
 
 	/* now then */
-	v = vp = calloc(vz = m->nvis, sizeof(*v));
-	for (ssize_t nrd; (nrd = read(fd, vp, vz)) > 0; vp += nrd, vz -= nrd);
-	return v;
+	while ((nrd = getline(&line, &llen, stdin)) > 0) {
+		char *p;
+		long unsigned int v;
+		long unsigned int c;
+
+		/* read the term id */
+		v = strtoul(line, &p, 0);
+		if (*p++ != '\t') {
+			continue;
+		}
+		/* read the count */
+		c = strtoul(p, &p, 0);
+		if (*p++ != '\n') {
+			continue;
+		}
+
+		if (UNLIKELY(i >= spsz)) {
+			/* extend vector */
+			size_t nu = spsz + 256U;
+			spsv = realloc(spsv, nu *= sizeof(*spsv));
+			spsz = nu;
+		}
+		/* assign index/value pair */
+		spsv[i].i = v;
+		spsv[i].v = c;
+		i++;
+	}
+	return (spsv_t){.z = i, .v = spsv};
 }
 
-static void
+static __attribute__((unused)) void
 popul_ui8(float *restrict x, const uint8_t *n, size_t z)
 {
 	for (size_t i = 0; i < z; i++) {
 		x[i] = (float)(int)n[i];
 	}
 	return;
+}
+
+static size_t
+popul_sv(float *restrict x, const spsv_t sv)
+{
+/* Populate the bottom visible layer X (hopefully large enough)
+ * with values from sparse vector SV.
+ * Return the total number of words. */
+	size_t res = 0U;
+
+	for (size_t j = 0; j < sv.z; j++) {
+		size_t i = sv.v[j].i;
+		uint8_t c = sv.v[j].v;
+
+		res += c;
+		x[i] = (float)(int)c;
+	}
+	return res;
 }
 
 static __attribute__((unused)) float
@@ -598,7 +668,7 @@ smpl_vis(float *restrict v, dl_rbm_t m, const float vis[static m->nvis])
 
 /* training and classifying modes */
 static void
-train(dl_rbm_t m, const uint8_t *v)
+train(dl_rbm_t m, struct spsv_s sv)
 {
 	const size_t nv = m->nvis;
 	const size_t nh = m->nhid;
@@ -614,7 +684,7 @@ train(dl_rbm_t m, const uint8_t *v)
 	DEBUG(float *hs = calloc(nh, sizeof(*hs)));
 
 	/* populate from input */
-	popul_ui8(vo, v, nv);
+	popul_sv(vo, sv);
 
 	/* vh gibbs */
 	prop_up(ho, m, vo);
@@ -774,7 +844,7 @@ train(dl_rbm_t m, const uint8_t *v)
 }
 
 static void
-dream(dl_rbm_t m, const uint8_t *v)
+dream(dl_rbm_t m, spsv_t sv)
 {
 	const size_t nv = m->nvis;
 	const size_t nh = m->nhid;
@@ -787,7 +857,7 @@ dream(dl_rbm_t m, const uint8_t *v)
 	ho = calloc(nh, sizeof(*ho));
 
 	/* populate from input */
-	popul_ui8(vo, v, nv);
+	popul_sv(vo, sv);
 
 	/* vhv gibbs */
 	prop_up(ho, m, vo);
@@ -887,21 +957,22 @@ main(int argc, char *argv[])
 		res = check(m);
 	} else if (argi->train_given) {
 		if (!isatty(STDIN_FILENO)) {
-			uint8_t *v = read_tf(STDIN_FILENO, m);
+			spsv_t sv = read_tf(STDIN_FILENO);
 
 			for (size_t i = 0; i < 1U; i++) {
-				train(m, v);
+				train(m, sv);
 			}
-			free(v);
 		}
 	} else if (argi->dream_given) {
 		if (!isatty(STDIN_FILENO)) {
-			uint8_t *v = read_tf(STDIN_FILENO, m);
+			spsv_t sv = read_tf(STDIN_FILENO);
 
-			dream(m, v);
-			free(v);
+			dream(m, sv);
 		}
 	}
+
+	/* just to deinitialise resources */
+	(void)read_tf(-1);
 wrout:
 	deinit_rand();
 	dump(m);
