@@ -21,7 +21,7 @@
 
 /* pick an implementation */
 #if !defined SALAKHUTDINOV && !defined GEHLER
-#define GEHLER		1
+#define SALAKHUTDINOV	1
 #endif	/* !SALAKHUTDINOV && !GEHLER */
 
 #if defined __INTEL_COMPILER
@@ -551,6 +551,10 @@ integ_layer(const float *x, size_t z)
 #endif	/* !NDEBUG */
 
 
+/* propagation, gibbs sampling and learning */
+/* global parameters */
+static size_t N;
+
 static int
 prop_up(float *restrict h, dl_rbm_t m, const float vis[static m->nvis])
 {
@@ -621,21 +625,16 @@ expt_vis(float *restrict v, dl_rbm_t m, const float vis[static m->nvis])
 	const size_t nvis = m->nvis;
 #if defined SALAKHUTDINOV
 	float nor = 0.f;
-	float N = 0.f;
 #endif	/* SALAKHUTDINOV */
 
 	DEBUG(dump_layer("Va", vis, nvis));
 
 #if defined SALAKHUTDINOV
-	/* calc N */
-	for (size_t i = 0; i < nvis; i++) {
-		N += vis[i];
-	}
 	/* calc \sum exp(v) */
 	for (size_t i = 0; i < nvis; i++) {
 		nor += v[i] = exp(vis[i]);
 	}
-	with (const float norm = (float)106 / nor) {
+	with (const float norm = (float)N / nor) {
 		for (size_t i = 0; i < nvis; i++) {
 			v[i] = v[i] * norm;
 		}
@@ -684,7 +683,7 @@ train(dl_rbm_t m, struct spsv_s sv)
 	DEBUG(float *hs = calloc(nh, sizeof(*hs)));
 
 	/* populate from input */
-	popul_sv(vo, sv);
+	N = popul_sv(vo, sv);
 
 	/* vh gibbs */
 	prop_up(ho, m, vo);
@@ -857,7 +856,7 @@ dream(dl_rbm_t m, spsv_t sv)
 	ho = calloc(nh, sizeof(*ho));
 
 	/* populate from input */
-	popul_sv(vo, sv);
+	N = popul_sv(vo, sv);
 
 	/* vhv gibbs */
 	prop_up(ho, m, vo);
