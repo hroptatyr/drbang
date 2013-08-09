@@ -943,7 +943,7 @@ main(int argc, char *argv[])
 			.nhid = 256U,
 		};
 
-		/* wobble the matrices */
+		/* just create the machine */
 		if ((m = crea("test.rbm", ini)) == NULL) {
 			res = 1;
 		}
@@ -951,7 +951,10 @@ main(int argc, char *argv[])
 	}
 
 	/* read the machine file */
-	m = pump("test.rbm");
+	if (UNLIKELY((m = pump("test.rbm")) == NULL)) {
+		res = 1;
+		goto wrout;
+	}
 
 	if (argi->check_given) {
 		res = check(m);
