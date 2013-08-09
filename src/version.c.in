@@ -1,0 +1,5 @@
+#include "version.h"
+
+#define VERSION "@VERSION@"
+
+const char drbang_version_string[] = VERSION;
