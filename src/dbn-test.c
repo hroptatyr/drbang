@@ -21,7 +21,7 @@
 
 /* pick an implementation */
 #if !defined SALAKHUTDINOV && !defined GEHLER
-#define GEHLER		1
+#define SALAKHUTDINOV	1
 #endif	/* !SALAKHUTDINOV && !GEHLER */
 
 #if defined __INTEL_COMPILER
@@ -83,19 +83,6 @@ factorial(uint8_t n)
 	return res;
 }
 
-static float
-poissf(float lambda, uint8_t n)
-{
-	float res;
-
-	res = exp(-lambda);
-	for (uint8_t i = n; i > 0; i--) {
-		res *= lambda;
-	}
-	res /= factorialf(n);
-	return res;
-}
-
 static long double
 factoriall(uint8_t n)
 {
@@ -119,7 +106,20 @@ factoriall(uint8_t n)
 	return res;
 }
 
-static double
+static __attribute__((unused)) float
+poissf(float lambda, uint8_t n)
+{
+	float res;
+
+	res = exp(-lambda);
+	for (uint8_t i = n; i > 0; i--) {
+		res *= lambda;
+	}
+	res /= factorialf(n);
+	return res;
+}
+
+static __attribute__((unused)) double
 poiss(double lambda, uint8_t n)
 {
 	double res;
@@ -132,7 +132,7 @@ poiss(double lambda, uint8_t n)
 	return res;
 }
 
-static long double
+static __attribute__((unused)) long double
 poissl(long double lambda, uint8_t n)
 {
 	long double res;
@@ -386,26 +386,96 @@ out:
 }
 
 
-static uint8_t*
-read_tf(const int fd, dl_rbm_t m)
+/* sparse integer vectors */
+typedef struct spsc_s spsc_t;
+typedef struct spsv_s spsv_t;
+
+struct spsc_s {
+	size_t i;
+	uint8_t v;
+};
+
+struct spsv_s {
+	size_t z;
+	spsc_t *v;
+};
+
+static spsv_t
+read_tf(const int fd)
 {
-	uint8_t *v;
-	uint8_t *vp;
-	size_t vz;
+	static char *line;
+	static size_t llen;
+	static struct spsc_s *spsv;
+	static size_t spsz;
+	ssize_t nrd;
+	size_t i = 0U;
+
+	if (UNLIKELY(fd < 0)) {
+		if (line != NULL) {
+			free(line);
+		}
+		if (spsv != NULL) {
+			free(spsv);
+		}
+		return (spsv_t){.z = 0U, .v = NULL};
+	}
 
 	/* now then */
-	v = vp = calloc(vz = m->nvis, sizeof(*v));
-	for (ssize_t nrd; (nrd = read(fd, vp, vz)) > 0; vp += nrd, vz -= nrd);
-	return v;
+	while ((nrd = getline(&line, &llen, stdin)) > 0) {
+		char *p;
+		long unsigned int v;
+		long unsigned int c;
+
+		/* read the term id */
+		v = strtoul(line, &p, 0);
+		if (*p++ != '\t') {
+			continue;
+		}
+		/* read the count */
+		c = strtoul(p, &p, 0);
+		if (*p++ != '\n') {
+			continue;
+		}
+
+		if (UNLIKELY(i >= spsz)) {
+			/* extend vector */
+			size_t nu = spsz + 256U;
+			spsv = realloc(spsv, nu *= sizeof(*spsv));
+			spsz = nu;
+		}
+		/* assign index/value pair */
+		spsv[i].i = v;
+		spsv[i].v = c;
+		i++;
+	}
+	return (spsv_t){.z = i, .v = spsv};
 }
 
-static void
+static __attribute__((unused)) void
 popul_ui8(float *restrict x, const uint8_t *n, size_t z)
 {
 	for (size_t i = 0; i < z; i++) {
 		x[i] = (float)(int)n[i];
 	}
 	return;
+}
+
+static size_t
+popul_sv(float *restrict x, const spsv_t sv)
+{
+/* Populate the bottom visible layer X (hopefully large enough)
+ * with values from sparse vector SV.
+ * Return the total number of words. */
+	size_t res = 0U;
+
+	for (size_t j = 0; j < sv.z; j++) {
+		size_t i = sv.v[j].i;
+		uint8_t c = sv.v[j].v;
+
+		res += c;
+		x[i] = (float)(int)c;
+	}
+	return res;
 }
 
 static __attribute__((unused)) float
@@ -481,6 +551,10 @@ integ_layer(const float *x, size_t z)
 #endif	/* !NDEBUG */
 
 
+/* propagation, gibbs sampling and learning */
+/* global parameters */
+static size_t N;
+
 static int
 prop_up(float *restrict h, dl_rbm_t m, const float vis[static m->nvis])
 {
@@ -551,21 +625,16 @@ expt_vis(float *restrict v, dl_rbm_t m, const float vis[static m->nvis])
 	const size_t nvis = m->nvis;
 #if defined SALAKHUTDINOV
 	float nor = 0.f;
-	float N = 0.f;
 #endif	/* SALAKHUTDINOV */
 
 	DEBUG(dump_layer("Va", vis, nvis));
 
 #if defined SALAKHUTDINOV
-	/* calc N */
-	for (size_t i = 0; i < nvis; i++) {
-		N += vis[i];
-	}
 	/* calc \sum exp(v) */
 	for (size_t i = 0; i < nvis; i++) {
 		nor += v[i] = exp(vis[i]);
 	}
-	with (const float norm = (float)106 / nor) {
+	with (const float norm = (float)N / nor) {
 		for (size_t i = 0; i < nvis; i++) {
 			v[i] = v[i] * norm;
 		}
@@ -598,7 +667,7 @@ smpl_vis(float *restrict v, dl_rbm_t m, const float vis[static m->nvis])
 
 /* training and classifying modes */
 static void
-train(dl_rbm_t m, const uint8_t *v)
+train(dl_rbm_t m, struct spsv_s sv)
 {
 	const size_t nv = m->nvis;
 	const size_t nh = m->nhid;
@@ -614,7 +683,7 @@ train(dl_rbm_t m, const uint8_t *v)
 	DEBUG(float *hs = calloc(nh, sizeof(*hs)));
 
 	/* populate from input */
-	popul_ui8(vo, v, nv);
+	N = popul_sv(vo, sv);
 
 	/* vh gibbs */
 	prop_up(ho, m, vo);
@@ -774,7 +843,7 @@ train(dl_rbm_t m, const uint8_t *v)
 }
 
 static void
-dream(dl_rbm_t m, const uint8_t *v)
+dream(dl_rbm_t m, spsv_t sv)
 {
 	const size_t nv = m->nvis;
 	const size_t nh = m->nhid;
@@ -787,7 +856,7 @@ dream(dl_rbm_t m, const uint8_t *v)
 	ho = calloc(nh, sizeof(*ho));
 
 	/* populate from input */
-	popul_ui8(vo, v, nv);
+	N = popul_sv(vo, sv);
 
 	/* vhv gibbs */
 	prop_up(ho, m, vo);
@@ -873,7 +942,7 @@ main(int argc, char *argv[])
 			.nhid = 256U,
 		};
 
-		/* wobble the matrices */
+		/* just create the machine */
 		if ((m = crea("test.rbm", ini)) == NULL) {
 			res = 1;
 		}
@@ -881,27 +950,31 @@ main(int argc, char *argv[])
 	}
 
 	/* read the machine file */
-	m = pump("test.rbm");
+	if (UNLIKELY((m = pump("test.rbm")) == NULL)) {
+		res = 1;
+		goto wrout;
+	}
 
 	if (argi->check_given) {
 		res = check(m);
 	} else if (argi->train_given) {
 		if (!isatty(STDIN_FILENO)) {
-			uint8_t *v = read_tf(STDIN_FILENO, m);
+			spsv_t sv = read_tf(STDIN_FILENO);
 
 			for (size_t i = 0; i < 1U; i++) {
-				train(m, v);
+				train(m, sv);
 			}
-			free(v);
 		}
 	} else if (argi->dream_given) {
 		if (!isatty(STDIN_FILENO)) {
-			uint8_t *v = read_tf(STDIN_FILENO, m);
+			spsv_t sv = read_tf(STDIN_FILENO);
 
-			dream(m, v);
-			free(v);
+			dream(m, sv);
 		}
 	}
+
+	/* just to deinitialise resources */
+	(void)read_tf(-1);
 wrout:
 	deinit_rand();
 	dump(m);
