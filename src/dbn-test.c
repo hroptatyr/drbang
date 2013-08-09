@@ -83,19 +83,6 @@ factorial(uint8_t n)
 	return res;
 }
 
-static float
-poissf(float lambda, uint8_t n)
-{
-	float res;
-
-	res = exp(-lambda);
-	for (uint8_t i = n; i > 0; i--) {
-		res *= lambda;
-	}
-	res /= factorialf(n);
-	return res;
-}
-
 static long double
 factoriall(uint8_t n)
 {
@@ -119,7 +106,20 @@ factoriall(uint8_t n)
 	return res;
 }
 
-static double
+static __attribute__((unused)) float
+poissf(float lambda, uint8_t n)
+{
+	float res;
+
+	res = exp(-lambda);
+	for (uint8_t i = n; i > 0; i--) {
+		res *= lambda;
+	}
+	res /= factorialf(n);
+	return res;
+}
+
+static __attribute__((unused)) double
 poiss(double lambda, uint8_t n)
 {
 	double res;
@@ -132,7 +132,7 @@ poiss(double lambda, uint8_t n)
 	return res;
 }
 
-static long double
+static __attribute__((unused)) long double
 poissl(long double lambda, uint8_t n)
 {
 	long double res;
