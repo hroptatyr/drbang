@@ -54,6 +54,11 @@ CLEANFILES =
 CLEANFILES += version.c
 EXTRA_DIST += version.c.in
 
+noinst_LIBRARIES += libdrbang.a
+libdrbang_a_SOURCES =
+libdrbang_a_SOURCES += nifty.h
+libdrbang_a_SOURCES += version.c version.h
+
 
 version.c: version.c.in $(top_builddir)/version.mk
 	sed -e 's,[@]VERSION[@],$(VERSION),g' <$(srcdir)/$@.in >$@
