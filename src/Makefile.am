@@ -57,7 +57,18 @@ EXTRA_DIST += version.c.in
 noinst_LIBRARIES += libdrbang.a
 libdrbang_a_SOURCES =
 libdrbang_a_SOURCES += nifty.h
+libdrbang_a_SOURCES += rand.c rand.h
+libdrbang_a_SOURCES += rand-taus.c rand-taus.h
+libdrbang_a_SOURCES += rand-ziggurat.c rand-ziggurat.h
 libdrbang_a_SOURCES += version.c version.h
+
+noinst_PROGRAMS += dbn
+dbn_SOURCES = dbn-test.c
+dbn_CPPFLAGS = $(AM_CPPFLAGS)
+dbn_LDFLAGS = $(AM_LDFLAGS)
+dbn_LDFLAGS += -static
+dbn_LDADD = libdrbang.a
+BUILT_SOURCES += dbn-test.x dbn-test.xh
 
 
 version.c: version.c.in $(top_builddir)/version.mk
