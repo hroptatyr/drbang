@@ -33,10 +33,13 @@
 
 #if !defined NDEBUG
 # define DEBUG(args...)	args
+# define ni		__attribute__((noinline))
 #else  /* NDEBUG */
 # define DEBUG(args...)
+# define ni
 #endif	/* !NDEBUG */
 
+
 static float
 factorialf(uint8_t n)
 {
@@ -184,7 +187,7 @@ sigmal(long double x)
 #if !defined USE_BLAS
 typedef long int MKL_INT;
 
-static inline float
+static ni float
 cblas_sdot(
 	const MKL_INT N,
 	const float *X, const MKL_INT incX,
@@ -560,7 +563,7 @@ integ_layer(const float *x, size_t z)
 /* global parameters */
 static size_t N;
 
-static int
+static ni int
 prop_up(float *restrict h, dl_rbm_t m, const float vis[static m->nvis])
 {
 /* propagate visible units activation upwards to the hidden units (recon) */
@@ -577,7 +580,7 @@ prop_up(float *restrict h, dl_rbm_t m, const float vis[static m->nvis])
 	return 0;
 }
 
-static int
+static ni int
 expt_hid(float *restrict h, dl_rbm_t m, const float hid[static m->nhid])
 {
 	const size_t nhid = m->nhid;
@@ -590,7 +593,7 @@ expt_hid(float *restrict h, dl_rbm_t m, const float hid[static m->nhid])
 	return 0;
 }
 
-static int
+static ni int
 smpl_hid(float *restrict h, dl_rbm_t m, const float hid[static m->nhid])
 {
 /* infer hidden unit states given vis(ible units) */
@@ -607,7 +610,7 @@ smpl_hid(float *restrict h, dl_rbm_t m, const float hid[static m->nhid])
 	return 0;
 }
 
-static int
+static ni int
 prop_down(float *restrict v, dl_rbm_t m, const float hid[static m->nhid])
 {
 /* propagate hidden units activation downwards to the visible units */
@@ -624,7 +627,7 @@ prop_down(float *restrict v, dl_rbm_t m, const float hid[static m->nhid])
 	return 0;
 }
 
-static int
+static ni int
 expt_vis(float *restrict v, dl_rbm_t m, const float vis[static m->nvis])
 {
 	const size_t nvis = m->nvis;
@@ -652,7 +655,7 @@ expt_vis(float *restrict v, dl_rbm_t m, const float vis[static m->nvis])
 	return 0;
 }
 
-static int
+static ni int
 smpl_vis(float *restrict v, dl_rbm_t m, const float vis[static m->nvis])
 {
 /* infer visible unit states given hid(den units) */
@@ -728,7 +731,7 @@ fini_drbctx(struct drbctx_s *tgt)
 	return;
 }
 
-static void
+static ni void
 update_w(drbctx_t ctx)
 {
 	dl_rbm_t m = ctx->m;
@@ -782,7 +785,7 @@ update_w(drbctx_t ctx)
 	return;
 }
 
-static void
+static ni void
 update_b(drbctx_t ctx)
 {
 	dl_rbm_t m = ctx->m;
@@ -837,7 +840,7 @@ update_b(drbctx_t ctx)
 	return;
 }
 
-static void
+static ni void
 final_update_w(drbctx_t ctx)
 {
 /* finalise the weight update */
@@ -862,7 +865,7 @@ final_update_w(drbctx_t ctx)
 	return;
 }
 
-static void
+static ni void
 final_update_b(drbctx_t ctx)
 {
 /* finalise the weight update */
