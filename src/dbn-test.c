@@ -33,7 +33,7 @@
 
 #if !defined NDEBUG
 # define DEBUG(args...)	args
-# define ni		__attribute__((noinline))
+# define ni
 #else  /* NDEBUG */
 # define DEBUG(args...)
 # define ni
