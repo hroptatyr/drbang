@@ -681,7 +681,16 @@ struct drbctx_s {
 	float *ho;
 	float *vr;
 	float *hr;
+
+	/* difference vectors */
+	float *dh;
+	float *dv;
+	float *dw;
 };
+
+static const float eta = 0.02f;
+static const float mom = 0.9f;
+static const float dec = 0.f;
 
 static void
 init_drbctx(struct drbctx_s *restrict tgt, dl_rbm_t m)
@@ -696,6 +705,10 @@ init_drbctx(struct drbctx_s *restrict tgt, dl_rbm_t m)
 	tgt->vr = calloc(nv, sizeof(*tgt->vr));
 	tgt->ho = calloc(nh, sizeof(*tgt->ho));
 	tgt->hr = calloc(nh, sizeof(*tgt->hr));
+
+	tgt->dw = calloc(nh * nv, sizeof(*tgt->dw));
+	tgt->dh = calloc(nh, sizeof(*tgt->dh));
+	tgt->dv = calloc(nv, sizeof(*tgt->dv));
 	return;
 }
 
@@ -703,21 +716,129 @@ static void
 fini_drbctx(struct drbctx_s *tgt)
 {
 	tgt->m = NULL;
+
 	free(tgt->vo);
 	free(tgt->vr);
 	free(tgt->ho);
 	free(tgt->hr);
+
+	free(tgt->dw);
+	free(tgt->dv);
+	free(tgt->dh);
+	return;
+}
+
+static void
+update_w(drbctx_t ctx)
+{
+	dl_rbm_t m = ctx->m;
+	const float *vo = ctx->vo;
+	const float *ho = ctx->ho;
+	const float *vr = ctx->vr;
+	const float *hr = ctx->hr;
+	const size_t nv = m->nvis;
+	const size_t nh = m->nhid;
+#if !defined NDEBUG
+	float mind = INFINITY;
+	float maxd = -INFINITY;
+#endif	/* !NDEBUG */
+
+#define w(i, j)		m->w[i * nh + j]
+#define dw(i, j)	ctx->dw[i * nh + j]
+
+	/* bang <v_i h_j> into weights */
+	for (size_t i = 0; i < nv; i++) {
+		for (size_t j = 0; j < nh; j++) {
+			float vho = vo[i] * ho[j];
+			float vhr = vr[i] * hr[j];
+			float d = vho - vhr;
+
+			/* decay */
+			d -= dec * w(i, j);
+			/* learning rate */
+			d *= eta;
+			/* momentum term */
+			d += mom * dw(i, j);
+
+#if !defined NDEBUG
+			if (d < mind) {
+				mind = d;
+			}
+			if (d > maxd) {
+				maxd = d;
+			}
+#endif	/* !NDEBUG */
+			w(i, j) += dw(i, j) = d;
+		}
+	}
+#if !defined NDEBUG
+	printf("dw (%.6g  %.6g)\n", mind, maxd);
+#endif	/* !NDEBUG */
+#undef w
+#undef dw
+	return;
+}
+
+static void
+update_b(drbctx_t ctx)
+{
+	dl_rbm_t m = ctx->m;
+	const float *vo = ctx->vo;
+	const float *ho = ctx->ho;
+	const float *vr = ctx->vr;
+	const float *hr = ctx->hr;
+	const size_t nv = m->nvis;
+	const size_t nh = m->nhid;
+
+	/* the real update routine is here, called twice, for vb and hb */
+	static void __upd(
+		float *restrict b, float *restrict db,
+		const float *o, const float *r, const size_t z)
+	{
+#if !defined NDEBUG
+		float mind = INFINITY;
+		float maxd = -INFINITY;
+#endif	/* !NDEBUG */
+
+		for (size_t i = 0; i < z; i++) {
+			float d = o[i] - r[i];
+
+			/* decay */
+			d -= dec * b[i];
+			/* learning rate */
+			d *= eta;
+			/* momentum */
+			d += mom * db[i];
+
+#if !defined NDEBUG
+			if (d < mind) {
+				mind = d;
+			}
+			if (d > maxd) {
+				maxd = d;
+			}
+#endif	/* !NDEBUG */
+			b[i] += db[i] = d;
+		}
+#if !defined NDEBUG
+		printf("db (%.6g  %.6g)\n", mind, maxd);
+#endif	/* !NDEBUG */
+	}
+
+	/* bias update */
+	__upd(m->vbias, ctx->dv, vo, vr, nv);
+	__upd(m->hbias, ctx->dh, ho, hr, nh);
 	return;
 }
 
 static void
 train(drbctx_t ctx, struct spsv_s sv)
 {
-#define m	ctx->m
-#define vo	ctx->vo
-#define ho	ctx->ho
-#define vr	ctx->vr
-#define hr	ctx->hr
+	const dl_rbm_t m = ctx->m;
+	float *restrict vo = ctx->vo;
+	float *restrict ho = ctx->ho;
+	float *restrict vr = ctx->vr;
+	float *restrict hr = ctx->hr;
 	const size_t nv = m->nvis;
 	const size_t nh = m->nhid;
 
@@ -746,9 +867,6 @@ train(drbctx_t ctx, struct spsv_s sv)
 		size_t nhr = count_layer(hs, nh);
 		);
 
-	/* we won't sample the h reconstruction as we want to use the
-	 * the activations directly */
-
 #if !defined NDEBUG
 	size_t nso = count_layer(vo, nv);
 	size_t nsr = count_layer(vr, nv);
@@ -758,130 +876,19 @@ train(drbctx_t ctx, struct spsv_s sv)
 	printf("|ho| %zu  |hr| %zu\n", nho, nhr);
 #endif	/* !NDEBUG */
 
-	/* bang <v_i h_j> into weights and biasses */
-	with (float *w = m->w, *vb = m->vbias, *hb = m->hbias) {
-		const float eta = 0.02f;
-		const float mom = 0.9f;
-		const float dec = 0.f;
-		static float *dh;
-		static float *dv;
-		static float *dw;
-
-		if (UNLIKELY(dw == NULL)) {
-			dw = calloc(nh * nv, sizeof(*dw));
-		}
-		if (UNLIKELY(dh == NULL)) {
-			dh = calloc(nh, sizeof(*dh));
-		}
-		if (UNLIKELY(dv == NULL)) {
-			dv = calloc(nv, sizeof(*dv));
-		}
-
-#define w(i, j)		w[i * nh + j]
-#define dw(i, j)	dw[i * nh + j]
-#if !defined NDEBUG
-		float mind;
-		float maxd;
-
-		mind = INFINITY;
-		maxd = -INFINITY;
-#endif	/* !NDEBUG */
-		for (size_t i = 0; i < nv; i++) {
-			for (size_t j = 0; j < nh; j++) {
-				float vho = vo[i] * ho[j];
-				float vhr = vr[i] * hr[j];
-				float d = vho - vhr;
-
-				/* decay */
-				d -= dec * w(i, j);
-				/* learning rate */
-				d *= eta;
-				/* momentum term */
-				d += mom * dw(i, j);
+	/* we won't sample the h reconstruction as we want to use the
+	 * the activations directly */
+	update_w(ctx);
+	update_b(ctx);
 
 #if !defined NDEBUG
-				if (d < mind) {
-					mind = d;
-				}
-				if (d > maxd) {
-					maxd = d;
-				}
+	dump_layer("h", m->hbias, nh);
+	dump_layer("v", m->vbias, nv);
+	dump_layer("w", m->w, nh * nv);
 #endif	/* !NDEBUG */
-				w(i, j) += dw(i, j) = d;
-			}
-		}
-#if !defined NDEBUG
-		printf("dw (%.6g  %.6g)\n", mind, maxd);
-		mind = INFINITY;
-		maxd = -INFINITY;
-#endif	/* !NDEBUG */
-#undef w
-#undef dw
-
-		/* bias update */
-		for (size_t i = 0; i < nv; i++) {
-			float d = vo[i] - vr[i];
-
-			/* decay */
-			d -= dec * vb[i];
-			/* learning rate */
-			d *= eta;
-			/* momentum */
-			d += mom * dv[i];
-
-#if !defined NDEBUG
-			if (d < mind) {
-				mind = d;
-			}
-			if (d > maxd) {
-				maxd = d;
-			}
-#endif	/* !NDEBUG */
-			vb[i] += dv[i] = d;
-		}
-#if !defined NDEBUG
-		printf("dv (%.6g  %.6g)\n", mind, maxd);
-		mind = INFINITY;
-		maxd = -INFINITY;
-#endif	/* !NDEBUG */
-
-		for (size_t j = 0; j < nh; j++) {
-			float d = ho[j] - hr[j];
-
-			/* decay */
-			d -= dec * hb[j];
-			/* learning rate */
-			d *= eta;
-			/* momentum */
-			d += mom * dh[j];
-
-#if !defined NDEBUG
-			if (d < mind) {
-				mind = d;
-			}
-			if (d > maxd) {
-				maxd = d;
-			}
-#endif	/* !NDEBUG */
-			hb[j] += dh[j] = d;
-		}
-#if !defined NDEBUG
-		printf("dh (%.6g  %.6g)\n", mind, maxd);
-
-		dump_layer("h", m->hbias, nh);
-		dump_layer("v", m->vbias, nv);
-		dump_layer("w", m->w, nh * nv);
-#undef w
-#endif	/* !NDEBUG */
-	}
 
 	DEBUG(free(hs));
 	return;
-#undef m
-#undef vo
-#undef ho
-#undef vr
-#undef hr
 }
 
 static void
