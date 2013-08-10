@@ -17,7 +17,7 @@
 # include <mkl_cblas.h>
 #endif	/* USE_BLAS */
 
-#define PREFER_NUMERICAL_STABILITY_OVER_SPEED	1
+#define PREFER_NUMERICAL_STABILITY_OVER_SPEED
 
 /* pick an implementation */
 #if !defined SALAKHUTDINOV && !defined GEHLER
@@ -148,31 +148,31 @@ poissl(long double lambda, uint8_t n)
 static float
 sigmaf(float x)
 {
-#if PREFER_NUMERICAL_STABILITY_OVER_SPEED
+#if defined PREFER_NUMERICAL_STABILITY_OVER_SPEED
 	return (1.f + tanh(x / 2.f)) / 2.f;
-#else
+#else  /* !PREFER_NUMERICAL_STABILITY_OVER_SPEED */
 	return 1.f / (1.f + exp(-x));
-#endif
+#endif	/* PREFER_NUMERICAL_STABILITY_OVER_SPEED */
 }
 
 static double
 sigma(double x)
 {
-#if PREFER_NUMERICAL_STABILITY_OVER_SPEED
+#if defined PREFER_NUMERICAL_STABILITY_OVER_SPEED
 	return (1. + tanh(x / 2.)) / 2.;
-#else
+#else  /* !PREFER_NUMERICAL_STABILITY_OVER_SPEED */
 	return 1. / (1. + exp(-x));
-#endif
+#endif	/* PREFER_NUMERICAL_STABILITY_OVER_SPEED */
 }
 
 static long double
 sigmal(long double x)
 {
-#if PREFER_NUMERICAL_STABILITY_OVER_SPEED
+#if defined PREFER_NUMERICAL_STABILITY_OVER_SPEED
 	return (1.L + tanh(x / 2.L)) / 2.L;
-#else
+#else  /* !PREFER_NUMERICAL_STABILITY_OVER_SPEED */
 	return 1.L / (1.L + exp(-x));
-#endif
+#endif	/* PREFER_NUMERICAL_STABILITY_OVER_SPEED */
 }
 
 /* my own tgmaths */
