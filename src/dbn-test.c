@@ -18,7 +18,6 @@
 #endif	/* USE_BLAS */
 
 #define PREFER_NUMERICAL_STABILITY_OVER_SPEED
-#define DEFER_UPDATES
 
 /* pick an implementation */
 #if !defined SALAKHUTDINOV && !defined GEHLER
@@ -196,10 +195,8 @@ cblas_sdot(
 {
 	float sum = 0.f;
 
-#pragma omp parallel for
-	for (MKL_INT i = 0; i < N; i++) {
+	for (MKL_INT i = 0; i < N; i++, X += incX, Y += incY) {
 		sum += *X * *Y;
-		X += incX, Y += incY;
 	}
 	return sum;
 }

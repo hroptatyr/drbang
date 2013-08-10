@@ -64,16 +64,11 @@ libdrbang_a_SOURCES += version.c version.h
 
 noinst_PROGRAMS += dbn
 dbn_SOURCES = dbn-test.c
-dbn_CFLAGS = $(AM_CFLAGS)
-dbn_CFLAGS += -fopenmp
 dbn_CPPFLAGS = $(AM_CPPFLAGS)
 dbn_CPPFLAGS += -D_GNU_SOURCE
 dbn_LDFLAGS = $(AM_LDFLAGS)
-dbn_LDFLAGS += -lpthread
-#dbn_LDFLAGS += -static
-dbn_LDFLAGS += -Wl,-rpath,/opt/intel/lib/intel64
+dbn_LDFLAGS += -static
 dbn_LDADD = libdrbang.a
-dbn_LDADD += -liomp5
 BUILT_SOURCES += dbn-test.x dbn-test.xh
 
 
