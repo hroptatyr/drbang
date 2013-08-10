@@ -426,6 +426,10 @@ read_tf(const int fd)
 		long unsigned int v;
 		long unsigned int c;
 
+		/* check for form feeds, and maybe yield */
+		if (*line == '\f') {
+			break;
+		}
 		/* read the term id */
 		v = strtoul(line, &p, 0);
 		if (*p++ != '\t') {
@@ -958,19 +962,14 @@ main(int argc, char *argv[])
 	if (argi->check_given) {
 		res = check(m);
 	} else if (argi->train_given) {
-		if (!isatty(STDIN_FILENO)) {
-			spsv_t sv = read_tf(STDIN_FILENO);
+		const int fd = STDIN_FILENO;
 
-			for (size_t i = 0; i < 1U; i++) {
-				train(m, sv);
-			}
-		}
+		for (spsv_t sv; (sv = read_tf(fd)).z; train(m, sv));
+
 	} else if (argi->dream_given) {
-		if (!isatty(STDIN_FILENO)) {
-			spsv_t sv = read_tf(STDIN_FILENO);
+		const int fd = STDIN_FILENO;
 
-			dream(m, sv);
-		}
+		for (spsv_t sv; (sv = read_tf(fd)).z; dream(m, sv));
 	}
 
 	/* just to deinitialise resources */
