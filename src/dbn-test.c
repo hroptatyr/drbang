@@ -768,7 +768,10 @@ update_w(drbctx_t ctx)
 				maxd = d;
 			}
 #endif	/* !NDEBUG */
-			w(i, j) += dw(i, j) = d;
+#if !defined DEFER_UPDATES
+			w(i, j) +=
+#endif	/* !DEFER_UPDATES */
+				dw(i, j) = d;
 		}
 	}
 #if !defined NDEBUG
@@ -818,7 +821,10 @@ update_b(drbctx_t ctx)
 				maxd = d;
 			}
 #endif	/* !NDEBUG */
-			b[i] += db[i] = d;
+#if !defined DEFER_UPDATES
+			b[i] +=
+#endif	/* !DEFER_UPDATES */
+				db[i] = d;
 		}
 #if !defined NDEBUG
 		printf("db (%.6g  %.6g)\n", mind, maxd);
@@ -828,6 +834,60 @@ update_b(drbctx_t ctx)
 	/* bias update */
 	__upd(m->vbias, ctx->dv, vo, vr, nv);
 	__upd(m->hbias, ctx->dh, ho, hr, nh);
+	return;
+}
+
+static void
+final_update_w(drbctx_t ctx)
+{
+/* finalise the weight update */
+#if defined DEFER_UPDATES
+	const size_t nv = ctx->m->nvis;
+	const size_t nh = ctx->m->nhid;
+
+#define w(i, j)		ctx->m->w[i * nh + j]
+#define dw(i, j)	ctx->dw[i * nh + j]
+
+	/* now really bang <v_i h_j> into weights */
+	for (size_t i = 0; i < nv; i++) {
+		for (size_t j = 0; j < nh; j++) {
+			w(i, j) += dw(i, j);
+		}
+	}
+#undef w
+#undef dw
+#else  /* !DEFER_UPDATES */
+	ctx = ctx;
+#endif	/* DEFER_UPDATES */
+	return;
+}
+
+static void
+final_update_b(drbctx_t ctx)
+{
+/* finalise the weight update */
+#if defined DEFER_UPDATES
+	const size_t nv = ctx->m->nvis;
+	const size_t nh = ctx->m->nhid;
+
+#define v(i)		ctx->m->vbias[i]
+#define dv(i)		ctx->dv[i]
+
+	/* now really bang bias updates into the biasses */
+	for (size_t i = 0; i < nv; i++) {
+		v(i) += dv(i);
+	}
+#undef v
+#undef dv
+
+#define h(i)		ctx->m->hbias[i]
+#define dh(i)		ctx->dh[i]
+	for (size_t j = 0; j < nh; j++) {
+		h(j) += dh(j);
+	}
+#else  /* !DEFER_UPDATES */
+	ctx = ctx;
+#endif	/* DEFER_UPDATES */
 	return;
 }
 
@@ -1012,6 +1072,8 @@ main(int argc, char *argv[])
 	init_drbctx(ctx, m);
 	if (argi->train_given) {
 		for (spsv_t sv; (sv = read_tf(fd)).z; train(ctx, sv));
+		final_update_w(ctx);
+		final_update_b(ctx);
 	} else if (argi->dream_given) {
 		for (spsv_t sv; (sv = read_tf(fd)).z; dream(ctx, sv));
 	}
