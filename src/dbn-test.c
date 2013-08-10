@@ -465,13 +465,14 @@ popul_ui8(float *restrict x, const uint8_t *n, size_t z)
 }
 
 static size_t
-popul_sv(float *restrict x, const spsv_t sv)
+popul_sv(float *restrict x, size_t z, const spsv_t sv)
 {
 /* Populate the bottom visible layer X (hopefully large enough)
  * with values from sparse vector SV.
  * Return the total number of words. */
 	size_t res = 0U;
 
+	memset(x, 0, z * sizeof(*x));
 	for (size_t j = 0; j < sv.z; j++) {
 		size_t i = sv.v[j].i;
 		uint8_t c = sv.v[j].v;
@@ -670,24 +671,60 @@ smpl_vis(float *restrict v, dl_rbm_t m, const float vis[static m->nvis])
 
 
 /* training and classifying modes */
-static void
-train(dl_rbm_t m, struct spsv_s sv)
-{
-	const size_t nv = m->nvis;
-	const size_t nh = m->nhid;
+typedef struct drbctx_s *drbctx_t;
+
+struct drbctx_s {
+	dl_rbm_t m;
+
+	/* some scratch vectors for the gibbs sampling */
 	float *vo;
 	float *ho;
 	float *vr;
 	float *hr;
+};
 
-	vo = calloc(nv, sizeof(*vo));
-	vr = calloc(nv, sizeof(*vr));
-	ho = calloc(nh, sizeof(*ho));
-	hr = calloc(nh, sizeof(*hr));
+static void
+init_drbctx(struct drbctx_s *restrict tgt, dl_rbm_t m)
+{
+	const size_t nv = m->nvis;
+	const size_t nh = m->nhid;
+
+	tgt->m = m;
+
+	/* initialise the scratch vectors */
+	tgt->vo = calloc(nv, sizeof(*tgt->vo));
+	tgt->vr = calloc(nv, sizeof(*tgt->vr));
+	tgt->ho = calloc(nh, sizeof(*tgt->ho));
+	tgt->hr = calloc(nh, sizeof(*tgt->hr));
+	return;
+}
+
+static void
+fini_drbctx(struct drbctx_s *tgt)
+{
+	tgt->m = NULL;
+	free(tgt->vo);
+	free(tgt->vr);
+	free(tgt->ho);
+	free(tgt->hr);
+	return;
+}
+
+static void
+train(drbctx_t ctx, struct spsv_s sv)
+{
+#define m	ctx->m
+#define vo	ctx->vo
+#define ho	ctx->ho
+#define vr	ctx->vr
+#define hr	ctx->hr
+	const size_t nv = m->nvis;
+	const size_t nh = m->nhid;
+
 	DEBUG(float *hs = calloc(nh, sizeof(*hs)));
 
 	/* populate from input */
-	N = popul_sv(vo, sv);
+	N = popul_sv(vo, nv, sv);
 
 	/* vh gibbs */
 	prop_up(ho, m, vo);
@@ -838,29 +875,26 @@ train(dl_rbm_t m, struct spsv_s sv)
 #endif	/* !NDEBUG */
 	}
 
-	free(vo);
-	free(vr);
-	free(ho);
-	free(hr);
 	DEBUG(free(hs));
 	return;
+#undef m
+#undef vo
+#undef ho
+#undef vr
+#undef hr
 }
 
 static void
-dream(dl_rbm_t m, spsv_t sv)
+dream(drbctx_t ctx, spsv_t sv)
 {
+#define m	ctx->m
+#define vo	ctx->vo
+#define ho	ctx->ho
+#define vr	ctx->vr
 	const size_t nv = m->nvis;
-	const size_t nh = m->nhid;
-	float *vo;
-	float *ho;
-	float *vr;
-
-	vo = calloc(nv, sizeof(*vo));
-	vr = calloc(nv, sizeof(*vr));
-	ho = calloc(nh, sizeof(*ho));
 
 	/* populate from input */
-	N = popul_sv(vo, sv);
+	N = popul_sv(vo, nv, sv);
 
 	/* vhv gibbs */
 	prop_up(ho, m, vo);
@@ -878,11 +912,11 @@ dream(dl_rbm_t m, spsv_t sv)
 			printf("%zu\t%u\n", i, (unsigned int)vi);
 		}
 	}
-
-	free(vo);
-	free(vr);
-	free(ho);
 	return;
+#undef m
+#undef vo
+#undef ho
+#undef vr
 }
 
 static int
@@ -952,7 +986,7 @@ main(int argc, char *argv[])
 		}
 		goto wrout;
 	}
-
+	/* all other options need the machine file */
 	/* read the machine file */
 	if (UNLIKELY((m = pump("test.rbm")) == NULL)) {
 		res = 1;
@@ -961,19 +995,23 @@ main(int argc, char *argv[])
 
 	if (argi->check_given) {
 		res = check(m);
-	} else if (argi->train_given) {
-		const int fd = STDIN_FILENO;
+		goto wrout;
+	}
 
-		for (spsv_t sv; (sv = read_tf(fd)).z; train(m, sv));
+	/* from now on we're actually doing something with the machine */
+	static struct drbctx_s ctx[1];
+	const int fd = STDIN_FILENO;
 
+	init_drbctx(ctx, m);
+	if (argi->train_given) {
+		for (spsv_t sv; (sv = read_tf(fd)).z; train(ctx, sv));
 	} else if (argi->dream_given) {
-		const int fd = STDIN_FILENO;
-
-		for (spsv_t sv; (sv = read_tf(fd)).z; dream(m, sv));
+		for (spsv_t sv; (sv = read_tf(fd)).z; dream(ctx, sv));
 	}
 
 	/* just to deinitialise resources */
 	(void)read_tf(-1);
+	fini_drbctx(ctx);
 wrout:
 	deinit_rand();
 	dump(m);
