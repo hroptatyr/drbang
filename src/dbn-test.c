@@ -202,6 +202,23 @@ cblas_sdot(
 }
 #endif	/* !USE_BLAS */
 
+static ni float*
+tr(const float *w, const MKL_INT m, const MKL_INT n)
+{
+	float *res = malloc(m * n * sizeof(*res));
+
+#define wtr(i, j)	res[i * m + j]
+#define w(i, j)		w[i * n + j]
+	for (MKL_INT i = 0; i < m; i++) {
+		for (MKL_INT j = 0; j < n; j++) {
+			wtr(j, i) = w(i, j);
+		}
+	}
+#undef w
+#undef wtr
+	return res;
+}
+
 
 /* mmapping, adapted from fops.h */
 typedef struct glodf_s glodf_t;
@@ -293,18 +310,24 @@ struct dl_file_s {
 	float data[];
 };
 
+struct dl_rbm_priv_s {
+	glodfn_t f;
+	/* transpose of w */
+	float *wtr;
+};
+
 static dl_rbm_t
 pump(const char *file)
 {
 	static struct dl_rbm_s res;
-	static glodfn_t f;
+	static struct dl_rbm_priv_s p[1];
 
-	if (UNLIKELY((f = mmap_fn(file, O_RDWR)).fd < 0)) {
+	if (UNLIKELY((p->f = mmap_fn(file, O_RDWR)).fd < 0)) {
 		goto out;
-	} else if (UNLIKELY(f.fb.z < sizeof(struct dl_file_s))) {
+	} else if (UNLIKELY(p->f.fb.z < sizeof(struct dl_file_s))) {
 		goto out;
 	}
-	with (struct dl_file_s *fl = f.fb.d) {
+	with (struct dl_file_s *fl = p->f.fb.d) {
 		float_t *dp = fl->data + fl->off;
 
 		res.nvis = fl->nvis;
@@ -316,22 +339,26 @@ pump(const char *file)
 		dp += fl->nhid;
 
 		res.w = dp;
+
+		p->wtr = tr(res.w, fl->nvis, fl->nhid);
 	}
-	res.priv = &f;
+	res.priv = p;
 	return &res;
 out:
 	/* and out are we */
-	(void)munmap_fn(f);
+	(void)munmap_fn(p->f);
 	return NULL;
 }
 
 static int
 dump(dl_rbm_t m)
 {
+	struct dl_rbm_priv_s *p = m->priv;
+
 	if (UNLIKELY(m == NULL)) {
 		return 0;
 	}
-	return munmap_fn(*(glodfn_t*)m->priv);
+	return munmap_fn(p->f);
 }
 
 static dl_rbm_t
@@ -380,6 +407,10 @@ crea(const char *file, struct dl_file_s fs)
 			m->w[k] = wnois * x;
 		}
 
+		/* and wobble the transpose too */
+		with (struct dl_rbm_priv_s *p = m->priv) {
+			p->wtr = tr(m->w, m->nvis, m->nhid);
+		}
 		return m;
 	}
 
