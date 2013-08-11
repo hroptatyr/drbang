@@ -17,7 +17,8 @@
 # include <mkl_cblas.h>
 #endif	/* USE_BLAS */
 
-#define PREFER_NUMERICAL_STABILITY_OVER_SPEED	1
+#define PREFER_NUMERICAL_STABILITY_OVER_SPEED
+#define DEFER_UPDATES
 
 /* pick an implementation */
 #if !defined SALAKHUTDINOV && !defined GEHLER
@@ -33,10 +34,13 @@
 
 #if !defined NDEBUG
 # define DEBUG(args...)	args
+# define ni
 #else  /* NDEBUG */
 # define DEBUG(args...)
+# define ni
 #endif	/* !NDEBUG */
 
+
 static float
 factorialf(uint8_t n)
 {
@@ -148,31 +152,31 @@ poissl(long double lambda, uint8_t n)
 static float
 sigmaf(float x)
 {
-#if PREFER_NUMERICAL_STABILITY_OVER_SPEED
+#if defined PREFER_NUMERICAL_STABILITY_OVER_SPEED
 	return (1.f + tanh(x / 2.f)) / 2.f;
-#else
+#else  /* !PREFER_NUMERICAL_STABILITY_OVER_SPEED */
 	return 1.f / (1.f + exp(-x));
-#endif
+#endif	/* PREFER_NUMERICAL_STABILITY_OVER_SPEED */
 }
 
 static double
 sigma(double x)
 {
-#if PREFER_NUMERICAL_STABILITY_OVER_SPEED
+#if defined PREFER_NUMERICAL_STABILITY_OVER_SPEED
 	return (1. + tanh(x / 2.)) / 2.;
-#else
+#else  /* !PREFER_NUMERICAL_STABILITY_OVER_SPEED */
 	return 1. / (1. + exp(-x));
-#endif
+#endif	/* PREFER_NUMERICAL_STABILITY_OVER_SPEED */
 }
 
 static long double
 sigmal(long double x)
 {
-#if PREFER_NUMERICAL_STABILITY_OVER_SPEED
+#if defined PREFER_NUMERICAL_STABILITY_OVER_SPEED
 	return (1.L + tanh(x / 2.L)) / 2.L;
-#else
+#else  /* !PREFER_NUMERICAL_STABILITY_OVER_SPEED */
 	return 1.L / (1.L + exp(-x));
-#endif
+#endif	/* PREFER_NUMERICAL_STABILITY_OVER_SPEED */
 }
 
 /* my own tgmaths */
@@ -184,7 +188,7 @@ sigmal(long double x)
 #if !defined USE_BLAS
 typedef long int MKL_INT;
 
-static inline float
+static ni float
 cblas_sdot(
 	const MKL_INT N,
 	const float *X, const MKL_INT incX,
@@ -198,6 +202,23 @@ cblas_sdot(
 	return sum;
 }
 #endif	/* !USE_BLAS */
+
+static ni float*
+tr(const float *w, const MKL_INT m, const MKL_INT n)
+{
+	float *res = malloc(m * n * sizeof(*res));
+
+#define wtr(i, j)	res[i * m + j]
+#define w(i, j)		w[i * n + j]
+	for (MKL_INT i = 0; i < m; i++) {
+		for (MKL_INT j = 0; j < n; j++) {
+			wtr(j, i) = w(i, j);
+		}
+	}
+#undef w
+#undef wtr
+	return res;
+}
 
 
 /* mmapping, adapted from fops.h */
@@ -290,18 +311,24 @@ struct dl_file_s {
 	float data[];
 };
 
+struct dl_rbm_priv_s {
+	glodfn_t f;
+	/* transpose of w */
+	float *wtr;
+};
+
 static dl_rbm_t
 pump(const char *file)
 {
 	static struct dl_rbm_s res;
-	static glodfn_t f;
+	static struct dl_rbm_priv_s p[1];
 
-	if (UNLIKELY((f = mmap_fn(file, O_RDWR)).fd < 0)) {
+	if (UNLIKELY((p->f = mmap_fn(file, O_RDWR)).fd < 0)) {
 		goto out;
-	} else if (UNLIKELY(f.fb.z < sizeof(struct dl_file_s))) {
+	} else if (UNLIKELY(p->f.fb.z < sizeof(struct dl_file_s))) {
 		goto out;
 	}
-	with (struct dl_file_s *fl = f.fb.d) {
+	with (struct dl_file_s *fl = p->f.fb.d) {
 		float_t *dp = fl->data + fl->off;
 
 		res.nvis = fl->nvis;
@@ -313,22 +340,26 @@ pump(const char *file)
 		dp += fl->nhid;
 
 		res.w = dp;
+
+		p->wtr = tr(res.w, fl->nvis, fl->nhid);
 	}
-	res.priv = &f;
+	res.priv = p;
 	return &res;
 out:
 	/* and out are we */
-	(void)munmap_fn(f);
+	(void)munmap_fn(p->f);
 	return NULL;
 }
 
 static int
 dump(dl_rbm_t m)
 {
+	struct dl_rbm_priv_s *p = m->priv;
+
 	if (UNLIKELY(m == NULL)) {
 		return 0;
 	}
-	return munmap_fn(*(glodfn_t*)m->priv);
+	return munmap_fn(p->f);
 }
 
 static dl_rbm_t
@@ -377,6 +408,10 @@ crea(const char *file, struct dl_file_s fs)
 			m->w[k] = wnois * x;
 		}
 
+		/* and wobble the transpose too */
+		with (struct dl_rbm_priv_s *p = m->priv) {
+			p->wtr = tr(m->w, m->nvis, m->nhid);
+		}
 		return m;
 	}
 
@@ -426,6 +461,10 @@ read_tf(const int fd)
 		long unsigned int v;
 		long unsigned int c;
 
+		/* check for form feeds, and maybe yield */
+		if (*line == '\f') {
+			break;
+		}
 		/* read the term id */
 		v = strtoul(line, &p, 0);
 		if (*p++ != '\t') {
@@ -461,13 +500,14 @@ popul_ui8(float *restrict x, const uint8_t *n, size_t z)
 }
 
 static size_t
-popul_sv(float *restrict x, const spsv_t sv)
+popul_sv(float *restrict x, size_t z, const spsv_t sv)
 {
 /* Populate the bottom visible layer X (hopefully large enough)
  * with values from sparse vector SV.
  * Return the total number of words. */
 	size_t res = 0U;
 
+	memset(x, 0, z * sizeof(*x));
 	for (size_t j = 0; j < sv.z; j++) {
 		size_t i = sv.v[j].i;
 		uint8_t c = sv.v[j].v;
@@ -555,24 +595,25 @@ integ_layer(const float *x, size_t z)
 /* global parameters */
 static size_t N;
 
-static int
+static ni int
 prop_up(float *restrict h, dl_rbm_t m, const float vis[static m->nvis])
 {
 /* propagate visible units activation upwards to the hidden units (recon) */
 	const size_t nvis = m->nvis;
 	const size_t nhid = m->nhid;
-	const float *w = m->w;
+	const struct dl_rbm_priv_s *p = m->priv;
+	const float *wtr = p->wtr;
 	const float *b = m->hbias;
 
-#define w(i, j)		(w + i * nhid + j)
+#define w(j)		(wtr + j * nvis)
 	for (size_t j = 0; j < nhid; j++) {
-		h[j] = b[j] + cblas_sdot(nvis, w(0U, j), nhid, vis, 1U);
+		h[j] = b[j] + cblas_sdot(nvis, w(j), 1U, vis, 1U);
 	}
 #undef w
 	return 0;
 }
 
-static int
+static ni int
 expt_hid(float *restrict h, dl_rbm_t m, const float hid[static m->nhid])
 {
 	const size_t nhid = m->nhid;
@@ -585,7 +626,7 @@ expt_hid(float *restrict h, dl_rbm_t m, const float hid[static m->nhid])
 	return 0;
 }
 
-static int
+static ni int
 smpl_hid(float *restrict h, dl_rbm_t m, const float hid[static m->nhid])
 {
 /* infer hidden unit states given vis(ible units) */
@@ -602,7 +643,7 @@ smpl_hid(float *restrict h, dl_rbm_t m, const float hid[static m->nhid])
 	return 0;
 }
 
-static int
+static ni int
 prop_down(float *restrict v, dl_rbm_t m, const float hid[static m->nhid])
 {
 /* propagate hidden units activation downwards to the visible units */
@@ -611,15 +652,15 @@ prop_down(float *restrict v, dl_rbm_t m, const float hid[static m->nhid])
 	const float *w = m->w;
 	const float *b = m->vbias;
 
-#define w(i, j)		(w + i * nhid + j)
+#define w(i)		(w + i * nhid)
 	for (size_t i = 0; i < nvis; i++) {
-		v[i] = b[i] + cblas_sdot(nhid, w(i, 0U), 1U, hid, 1U);
+		v[i] = b[i] + cblas_sdot(nhid, w(i), 1U, hid, 1U);
 	}
 #undef w
 	return 0;
 }
 
-static int
+static ni int
 expt_vis(float *restrict v, dl_rbm_t m, const float vis[static m->nvis])
 {
 	const size_t nvis = m->nvis;
@@ -647,7 +688,7 @@ expt_vis(float *restrict v, dl_rbm_t m, const float vis[static m->nvis])
 	return 0;
 }
 
-static int
+static ni int
 smpl_vis(float *restrict v, dl_rbm_t m, const float vis[static m->nvis])
 {
 /* infer visible unit states given hid(den units) */
@@ -666,24 +707,244 @@ smpl_vis(float *restrict v, dl_rbm_t m, const float vis[static m->nvis])
 
 
 /* training and classifying modes */
-static void
-train(dl_rbm_t m, struct spsv_s sv)
-{
-	const size_t nv = m->nvis;
-	const size_t nh = m->nhid;
+typedef struct drbctx_s *drbctx_t;
+
+struct drbctx_s {
+	dl_rbm_t m;
+
+	/* some scratch vectors for the gibbs sampling */
 	float *vo;
 	float *ho;
 	float *vr;
 	float *hr;
 
-	vo = calloc(nv, sizeof(*vo));
-	vr = calloc(nv, sizeof(*vr));
-	ho = calloc(nh, sizeof(*ho));
-	hr = calloc(nh, sizeof(*hr));
+	/* difference vectors */
+	float *dh;
+	float *dv;
+	float *dw;
+};
+
+static const float eta = 0.02f;
+static const float mom = 0.9f;
+static const float dec = 0.f;
+
+static void
+init_drbctx(struct drbctx_s *restrict tgt, dl_rbm_t m)
+{
+	const size_t nv = m->nvis;
+	const size_t nh = m->nhid;
+
+	tgt->m = m;
+
+	/* initialise the scratch vectors */
+	tgt->vo = calloc(nv, sizeof(*tgt->vo));
+	tgt->vr = calloc(nv, sizeof(*tgt->vr));
+	tgt->ho = calloc(nh, sizeof(*tgt->ho));
+	tgt->hr = calloc(nh, sizeof(*tgt->hr));
+
+	tgt->dw = calloc(nh * nv, sizeof(*tgt->dw));
+	tgt->dh = calloc(nh, sizeof(*tgt->dh));
+	tgt->dv = calloc(nv, sizeof(*tgt->dv));
+	return;
+}
+
+static void
+fini_drbctx(struct drbctx_s *tgt)
+{
+	tgt->m = NULL;
+
+	free(tgt->vo);
+	free(tgt->vr);
+	free(tgt->ho);
+	free(tgt->hr);
+
+	free(tgt->dw);
+	free(tgt->dv);
+	free(tgt->dh);
+	return;
+}
+
+static ni void
+update_w(drbctx_t ctx)
+{
+	dl_rbm_t m = ctx->m;
+	const float *vo = ctx->vo;
+	const float *ho = ctx->ho;
+	const float *vr = ctx->vr;
+	const float *hr = ctx->hr;
+	const size_t nv = m->nvis;
+	const size_t nh = m->nhid;
+#if !defined NDEBUG
+	float mind = INFINITY;
+	float maxd = -INFINITY;
+#endif	/* !NDEBUG */
+
+#define w(i, j)		m->w[i * nh + j]
+#define wtr(i, j)	((struct dl_rbm_priv_s*)m->priv)->wtr[i * nv + j]
+#define dw(i, j)	ctx->dw[i * nh + j]
+
+	/* bang <v_i h_j> into weights */
+	for (size_t i = 0; i < nv; i++) {
+		for (size_t j = 0; j < nh; j++) {
+			float vho = vo[i] * ho[j];
+			float vhr = vr[i] * hr[j];
+			float d = vho - vhr;
+
+			/* decay */
+			d -= dec * w(i, j);
+			/* learning rate */
+			d *= eta;
+			/* momentum term */
+			d += mom * dw(i, j);
+
+#if !defined NDEBUG
+			if (d < mind) {
+				mind = d;
+			}
+			if (d > maxd) {
+				maxd = d;
+			}
+#endif	/* !NDEBUG */
+#if !defined DEFER_UPDATES
+			wtr(j, i) += d;
+			w(i, j) +=
+#endif	/* !DEFER_UPDATES */
+				dw(i, j) = d;
+		}
+	}
+#if !defined NDEBUG
+	printf("dw (%.6g  %.6g)\n", mind, maxd);
+#endif	/* !NDEBUG */
+#undef w
+#undef wtr
+#undef dw
+	return;
+}
+
+static ni void
+update_b(drbctx_t ctx)
+{
+	dl_rbm_t m = ctx->m;
+	const float *vo = ctx->vo;
+	const float *ho = ctx->ho;
+	const float *vr = ctx->vr;
+	const float *hr = ctx->hr;
+	const size_t nv = m->nvis;
+	const size_t nh = m->nhid;
+
+	/* the real update routine is here, called twice, for vb and hb */
+	static void __upd(
+		float *restrict b, float *restrict db,
+		const float *o, const float *r, const size_t z)
+	{
+#if !defined NDEBUG
+		float mind = INFINITY;
+		float maxd = -INFINITY;
+#endif	/* !NDEBUG */
+
+		for (size_t i = 0; i < z; i++) {
+			float d = o[i] - r[i];
+
+			/* decay */
+			d -= dec * b[i];
+			/* learning rate */
+			d *= eta;
+			/* momentum */
+			d += mom * db[i];
+
+#if !defined NDEBUG
+			if (d < mind) {
+				mind = d;
+			}
+			if (d > maxd) {
+				maxd = d;
+			}
+#endif	/* !NDEBUG */
+#if !defined DEFER_UPDATES
+			b[i] +=
+#endif	/* !DEFER_UPDATES */
+				db[i] = d;
+		}
+#if !defined NDEBUG
+		printf("db (%.6g  %.6g)\n", mind, maxd);
+#endif	/* !NDEBUG */
+	}
+
+	/* bias update */
+	__upd(m->vbias, ctx->dv, vo, vr, nv);
+	__upd(m->hbias, ctx->dh, ho, hr, nh);
+	return;
+}
+
+static ni void
+final_update_w(drbctx_t ctx)
+{
+/* finalise the weight update */
+#if defined DEFER_UPDATES
+	const size_t nv = ctx->m->nvis;
+	const size_t nh = ctx->m->nhid;
+
+#define w(i, j)		ctx->m->w[i * nh + j]
+#define dw(i, j)	ctx->dw[i * nh + j]
+
+	/* now really bang <v_i h_j> into weights */
+	for (size_t i = 0; i < nv; i++) {
+		for (size_t j = 0; j < nh; j++) {
+			w(i, j) += dw(i, j);
+		}
+	}
+#undef w
+#undef dw
+#else  /* !DEFER_UPDATES */
+	ctx = ctx;
+#endif	/* DEFER_UPDATES */
+	return;
+}
+
+static ni void
+final_update_b(drbctx_t ctx)
+{
+/* finalise the weight update */
+#if defined DEFER_UPDATES
+	const size_t nv = ctx->m->nvis;
+	const size_t nh = ctx->m->nhid;
+
+#define v(i)		ctx->m->vbias[i]
+#define dv(i)		ctx->dv[i]
+
+	/* now really bang bias updates into the biasses */
+	for (size_t i = 0; i < nv; i++) {
+		v(i) += dv(i);
+	}
+#undef v
+#undef dv
+
+#define h(i)		ctx->m->hbias[i]
+#define dh(i)		ctx->dh[i]
+	for (size_t j = 0; j < nh; j++) {
+		h(j) += dh(j);
+	}
+#else  /* !DEFER_UPDATES */
+	ctx = ctx;
+#endif	/* DEFER_UPDATES */
+	return;
+}
+
+static void
+train(drbctx_t ctx, struct spsv_s sv)
+{
+	const dl_rbm_t m = ctx->m;
+	float *restrict vo = ctx->vo;
+	float *restrict ho = ctx->ho;
+	float *restrict vr = ctx->vr;
+	float *restrict hr = ctx->hr;
+	const size_t nv = m->nvis;
+	const size_t nh = m->nhid;
+
 	DEBUG(float *hs = calloc(nh, sizeof(*hs)));
 
 	/* populate from input */
-	N = popul_sv(vo, sv);
+	N = popul_sv(vo, nv, sv);
 
 	/* vh gibbs */
 	prop_up(ho, m, vo);
@@ -705,9 +966,6 @@ train(dl_rbm_t m, struct spsv_s sv)
 		size_t nhr = count_layer(hs, nh);
 		);
 
-	/* we won't sample the h reconstruction as we want to use the
-	 * the activations directly */
-
 #if !defined NDEBUG
 	size_t nso = count_layer(vo, nv);
 	size_t nsr = count_layer(vr, nv);
@@ -717,146 +975,32 @@ train(dl_rbm_t m, struct spsv_s sv)
 	printf("|ho| %zu  |hr| %zu\n", nho, nhr);
 #endif	/* !NDEBUG */
 
-	/* bang <v_i h_j> into weights and biasses */
-	with (float *w = m->w, *vb = m->vbias, *hb = m->hbias) {
-		const float eta = 0.02f;
-		const float mom = 0.9f;
-		const float dec = 0.f;
-		static float *dh;
-		static float *dv;
-		static float *dw;
-
-		if (UNLIKELY(dw == NULL)) {
-			dw = calloc(nh * nv, sizeof(*dw));
-		}
-		if (UNLIKELY(dh == NULL)) {
-			dh = calloc(nh, sizeof(*dh));
-		}
-		if (UNLIKELY(dv == NULL)) {
-			dv = calloc(nv, sizeof(*dv));
-		}
-
-#define w(i, j)		w[i * nh + j]
-#define dw(i, j)	dw[i * nh + j]
-#if !defined NDEBUG
-		float mind;
-		float maxd;
-
-		mind = INFINITY;
-		maxd = -INFINITY;
-#endif	/* !NDEBUG */
-		for (size_t i = 0; i < nv; i++) {
-			for (size_t j = 0; j < nh; j++) {
-				float vho = vo[i] * ho[j];
-				float vhr = vr[i] * hr[j];
-				float d = vho - vhr;
-
-				/* decay */
-				d -= dec * w(i, j);
-				/* learning rate */
-				d *= eta;
-				/* momentum term */
-				d += mom * dw(i, j);
+	/* we won't sample the h reconstruction as we want to use the
+	 * the activations directly */
+	update_w(ctx);
+	update_b(ctx);
 
 #if !defined NDEBUG
-				if (d < mind) {
-					mind = d;
-				}
-				if (d > maxd) {
-					maxd = d;
-				}
-#endif	/* !NDEBUG */
-				w(i, j) += dw(i, j) = d;
-			}
-		}
-#if !defined NDEBUG
-		printf("dw (%.6g  %.6g)\n", mind, maxd);
-		mind = INFINITY;
-		maxd = -INFINITY;
-#endif	/* !NDEBUG */
-#undef w
-#undef dw
-
-		/* bias update */
-		for (size_t i = 0; i < nv; i++) {
-			float d = vo[i] - vr[i];
-
-			/* decay */
-			d -= dec * vb[i];
-			/* learning rate */
-			d *= eta;
-			/* momentum */
-			d += mom * dv[i];
-
-#if !defined NDEBUG
-			if (d < mind) {
-				mind = d;
-			}
-			if (d > maxd) {
-				maxd = d;
-			}
-#endif	/* !NDEBUG */
-			vb[i] += dv[i] = d;
-		}
-#if !defined NDEBUG
-		printf("dv (%.6g  %.6g)\n", mind, maxd);
-		mind = INFINITY;
-		maxd = -INFINITY;
+	dump_layer("h", m->hbias, nh);
+	dump_layer("v", m->vbias, nv);
+	dump_layer("w", m->w, nh * nv);
 #endif	/* !NDEBUG */
 
-		for (size_t j = 0; j < nh; j++) {
-			float d = ho[j] - hr[j];
-
-			/* decay */
-			d -= dec * hb[j];
-			/* learning rate */
-			d *= eta;
-			/* momentum */
-			d += mom * dh[j];
-
-#if !defined NDEBUG
-			if (d < mind) {
-				mind = d;
-			}
-			if (d > maxd) {
-				maxd = d;
-			}
-#endif	/* !NDEBUG */
-			hb[j] += dh[j] = d;
-		}
-#if !defined NDEBUG
-		printf("dh (%.6g  %.6g)\n", mind, maxd);
-
-		dump_layer("h", m->hbias, nh);
-		dump_layer("v", m->vbias, nv);
-		dump_layer("w", m->w, nh * nv);
-#undef w
-#endif	/* !NDEBUG */
-	}
-
-	free(vo);
-	free(vr);
-	free(ho);
-	free(hr);
 	DEBUG(free(hs));
 	return;
 }
 
 static void
-dream(dl_rbm_t m, spsv_t sv)
+dream(drbctx_t ctx, spsv_t sv)
 {
+#define m	ctx->m
+#define vo	ctx->vo
+#define ho	ctx->ho
+#define vr	ctx->vr
 	const size_t nv = m->nvis;
-	const size_t nh = m->nhid;
-	float *vo;
-	float *ho;
-	float *vr;
-
-	vo = calloc(nv, sizeof(*vo));
-	vr = calloc(nv, sizeof(*vr));
-	ho = calloc(nh, sizeof(*ho));
 
 	/* populate from input */
-	N = popul_sv(vo, sv);
+	N = popul_sv(vo, nv, sv);
 
 	/* vhv gibbs */
 	prop_up(ho, m, vo);
@@ -874,11 +1018,11 @@ dream(dl_rbm_t m, spsv_t sv)
 			printf("%zu\t%u\n", i, (unsigned int)vi);
 		}
 	}
-
-	free(vo);
-	free(vr);
-	free(ho);
 	return;
+#undef m
+#undef vo
+#undef ho
+#undef vr
 }
 
 static int
@@ -948,7 +1092,7 @@ main(int argc, char *argv[])
 		}
 		goto wrout;
 	}
-
+	/* all other options need the machine file */
 	/* read the machine file */
 	if (UNLIKELY((m = pump("test.rbm")) == NULL)) {
 		res = 1;
@@ -957,24 +1101,25 @@ main(int argc, char *argv[])
 
 	if (argi->check_given) {
 		res = check(m);
-	} else if (argi->train_given) {
-		if (!isatty(STDIN_FILENO)) {
-			spsv_t sv = read_tf(STDIN_FILENO);
+		goto wrout;
+	}
 
-			for (size_t i = 0; i < 1U; i++) {
-				train(m, sv);
-			}
-		}
+	/* from now on we're actually doing something with the machine */
+	static struct drbctx_s ctx[1];
+	const int fd = STDIN_FILENO;
+
+	init_drbctx(ctx, m);
+	if (argi->train_given) {
+		for (spsv_t sv; (sv = read_tf(fd)).z; train(ctx, sv));
+		final_update_w(ctx);
+		final_update_b(ctx);
 	} else if (argi->dream_given) {
-		if (!isatty(STDIN_FILENO)) {
-			spsv_t sv = read_tf(STDIN_FILENO);
-
-			dream(m, sv);
-		}
+		for (spsv_t sv; (sv = read_tf(fd)).z; dream(ctx, sv));
 	}
 
 	/* just to deinitialise resources */
 	(void)read_tf(-1);
+	fini_drbctx(ctx);
 wrout:
 	deinit_rand();
 	dump(m);
