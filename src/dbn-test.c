@@ -202,24 +202,6 @@ cblas_sdot(
 }
 #endif	/* !USE_BLAS */
 
-#if defined __INTEL_COMPILER
-# pragma warning (disable:981)
-#endif	/* __INTEL_COMPILER */
-static ni float
-drb_sdot_inc1(const MKL_INT N, const float *X, const float *Y)
-{
-/* like cblas_sdot() but the increments are 1 */
-	float sum = 0.f;
-
-	for (MKL_INT i = 0; i < N; i++) {
-		sum += *X++ * *Y++;
-	}
-	return sum;
-}
-#if defined __INTEL_COMPILER
-# pragma warning (default:981)
-#endif	/* __INTEL_COMPILER */
-
 static ni float*
 tr(const float *w, const MKL_INT m, const MKL_INT n)
 {
@@ -624,7 +606,7 @@ prop_up(float *restrict h, dl_rbm_t m, const float vis[static m->nvis])
 
 #define w(j)		(wtr + j * nvis)
 	for (size_t j = 0; j < nhid; j++) {
-		h[j] = b[j] + drb_sdot_inc1(nvis, w(j), vis);
+		h[j] = b[j] + cblas_sdot(nvis, w(j), 1U, vis, 1U);
 	}
 #undef w
 	return 0;
@@ -671,7 +653,7 @@ prop_down(float *restrict v, dl_rbm_t m, const float hid[static m->nhid])
 
 #define w(i)		(w + i * nhid)
 	for (size_t i = 0; i < nvis; i++) {
-		v[i] = b[i] + drb_sdot_inc1(nhid, w(i), hid);
+		v[i] = b[i] + cblas_sdot(nhid, w(i), 1U, hid, 1U);
 	}
 #undef w
 	return 0;
