@@ -202,6 +202,24 @@ cblas_sdot(
 }
 #endif	/* !USE_BLAS */
 
+#if defined __INTEL_COMPILER
+# pragma warning (disable:981)
+#endif	/* __INTEL_COMPILER */
+static ni float
+drb_sdot_inc1(const MKL_INT N, const float *X, const float *Y)
+{
+/* like cblas_sdot() but the increments are 1 */
+	float sum = 0.f;
+
+	for (MKL_INT i = 0; i < N; i++) {
+		sum += *X++ * *Y++;
+	}
+	return sum;
+}
+#if defined __INTEL_COMPILER
+# pragma warning (default:981)
+#endif	/* __INTEL_COMPILER */
+
 static ni float*
 tr(const float *w, const MKL_INT m, const MKL_INT n)
 {
@@ -600,12 +618,13 @@ prop_up(float *restrict h, dl_rbm_t m, const float vis[static m->nvis])
 /* propagate visible units activation upwards to the hidden units (recon) */
 	const size_t nvis = m->nvis;
 	const size_t nhid = m->nhid;
-	const float *w = m->w;
+	const struct dl_rbm_priv_s *p = m->priv;
+	const float *wtr = p->wtr;
 	const float *b = m->hbias;
 
-#define w(i, j)		(w + i * nhid + j)
+#define w(j)		(wtr + j * nvis)
 	for (size_t j = 0; j < nhid; j++) {
-		h[j] = b[j] + cblas_sdot(nvis, w(0U, j), nhid, vis, 1U);
+		h[j] = b[j] + drb_sdot_inc1(nvis, w(j), vis);
 	}
 #undef w
 	return 0;
@@ -650,9 +669,9 @@ prop_down(float *restrict v, dl_rbm_t m, const float hid[static m->nhid])
 	const float *w = m->w;
 	const float *b = m->vbias;
 
-#define w(i, j)		(w + i * nhid + j)
+#define w(i)		(w + i * nhid)
 	for (size_t i = 0; i < nvis; i++) {
-		v[i] = b[i] + cblas_sdot(nhid, w(i, 0U), 1U, hid, 1U);
+		v[i] = b[i] + drb_sdot_inc1(nhid, w(i), hid);
 	}
 #undef w
 	return 0;
@@ -778,6 +797,7 @@ update_w(drbctx_t ctx)
 #endif	/* !NDEBUG */
 
 #define w(i, j)		m->w[i * nh + j]
+#define wtr(i, j)	((struct dl_rbm_priv_s*)m->priv)->wtr[i * nv + j]
 #define dw(i, j)	ctx->dw[i * nh + j]
 
 	/* bang <v_i h_j> into weights */
@@ -803,6 +823,7 @@ update_w(drbctx_t ctx)
 			}
 #endif	/* !NDEBUG */
 #if !defined DEFER_UPDATES
+			wtr(j, i) += d;
 			w(i, j) +=
 #endif	/* !DEFER_UPDATES */
 				dw(i, j) = d;
@@ -812,6 +833,7 @@ update_w(drbctx_t ctx)
 	printf("dw (%.6g  %.6g)\n", mind, maxd);
 #endif	/* !NDEBUG */
 #undef w
+#undef wtr
 #undef dw
 	return;
 }
