@@ -18,6 +18,7 @@
 #endif	/* USE_BLAS */
 
 #define PREFER_NUMERICAL_STABILITY_OVER_SPEED
+#define DEFER_UPDATES
 
 /* pick an implementation */
 #if !defined SALAKHUTDINOV && !defined GEHLER
