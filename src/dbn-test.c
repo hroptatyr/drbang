@@ -834,20 +834,29 @@ static ni void
 update_w(drbctx_t ctx)
 {
 	dl_rbm_t m = ctx->m;
+	const struct dl_rbm_priv_s *p = m->priv;
 	const float *vo = ctx->vo;
 	const float *ho = ctx->ho;
 	const float *vr = ctx->vr;
 	const float *hr = ctx->hr;
 	const size_t nv = m->nvis;
 	const size_t nh = m->nhid;
+	float *restrict dw = ctx->dw;
+#if defined DEFER_UPDATES
+	const float *w = m->w;
+	const float *UNUSED(wtr) = p->wtr;
+#else  /* !DEFER_UPDATES */
+	float *restrict w = m->w;
+	float *restrict wtr = p->wtr;
+#endif	/* DEFER_UPDATES */
 #if !defined NDEBUG
 	float mind = INFINITY;
 	float maxd = -INFINITY;
 #endif	/* !NDEBUG */
 
-#define w(i, j)		m->w[i * nh + j]
-#define wtr(i, j)	((struct dl_rbm_priv_s*)m->priv)->wtr[i * nv + j]
-#define dw(i, j)	ctx->dw[i * nh + j]
+#define w(i, j)		w[i * nh + j]
+#define wtr(i, j)	wtr[i * nv + j]
+#define dw(i, j)	dw[i * nh + j]
 
 	/* bang <v_i h_j> into weights */
 	for (size_t i = 0; i < nv; i++) {
