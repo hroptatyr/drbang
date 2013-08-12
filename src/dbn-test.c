@@ -11,6 +11,7 @@
 #include <assert.h>
 #include <setjmp.h>
 #include <signal.h>
+#include "maths.h"
 #include "rand.h"
 #include "nifty.h"
 
@@ -19,7 +20,6 @@
 # include <mkl_cblas.h>
 #endif	/* USE_BLAS */
 
-#define PREFER_NUMERICAL_STABILITY_OVER_SPEED
 #define DEFER_UPDATES
 
 /* pick an implementation */
@@ -41,183 +41,6 @@
 # define DEBUG(args...)
 # define ni
 #endif	/* !NDEBUG */
-
-
-static float
-factorialf(uint8_t n)
-{
-	static const float table[] = {
-		1., 1., 2., 6., 24., 120., 720., 5040.,
-		40320., 362880., 3628800., 39916800.,
-		479001600., 6227020800., 87178291200., 1307674368000.,
-	};
-	float res;
-
-	if (LIKELY(n < countof(table))) {
-		return table[n];
-	}
-
-	/* otherwise proceed from 16! */
-	res = table[15U];
-	n -= 15U;
-	for (float x = 16.; n > 0; n--, x += 1.0) {
-		res *= x;
-	}
-	return res;
-}
-
-static double
-factorial(uint8_t n)
-{
-	static const double table[] = {
-		1., 1., 2., 6., 24., 120., 720., 5040.,
-		40320., 362880., 3628800., 39916800.,
-		479001600., 6227020800., 87178291200., 1307674368000.,
-	};
-	double res;
-
-	if (LIKELY(n < countof(table))) {
-		return table[n];
-	}
-
-	/* otherwise proceed from 16! */
-	res = table[15U];
-	n -= 15U;
-	for (double x = 16.; n > 0; n--, x += 1.0) {
-		res *= x;
-	}
-	return res;
-}
-
-static long double
-factoriall(uint8_t n)
-{
-	static const long double table[] = {
-		1.l, 1.l, 2.l, 6.l, 24.l, 120.l, 720.l, 5040.l,
-		40320.l, 362880.l, 3628800.l, 39916800.l,
-		479001600.l, 6227020800.l, 87178291200.l, 1307674368000.l,
-	};
-	long double res;
-
-	if (LIKELY(n < countof(table))) {
-		return table[n];
-	}
-
-	/* otherwise proceed from 16! */
-	res = table[15U];
-	n -= 15U;
-	for (long double x = 16.; n > 0; n--, x += 1.0) {
-		res *= x;
-	}
-	return res;
-}
-
-static __attribute__((unused)) float
-poissf(float lambda, uint8_t n)
-{
-	float res;
-
-	res = exp(-lambda);
-	for (uint8_t i = n; i > 0; i--) {
-		res *= lambda;
-	}
-	res /= factorialf(n);
-	return res;
-}
-
-static __attribute__((unused)) double
-poiss(double lambda, uint8_t n)
-{
-	double res;
-
-	res = exp(-lambda);
-	for (uint8_t i = n; i > 0; i--) {
-		res *= lambda;
-	}
-	res /= factorial(n);
-	return res;
-}
-
-static __attribute__((unused)) long double
-poissl(long double lambda, uint8_t n)
-{
-	long double res;
-
-	res = exp(-lambda);
-	for (uint8_t i = n; i > 0; i--) {
-		res *= lambda;
-	}
-	res /= factoriall(n);
-	return res;
-}
-
-static float
-sigmaf(float x)
-{
-#if defined PREFER_NUMERICAL_STABILITY_OVER_SPEED
-	return (1.f + tanh(x / 2.f)) / 2.f;
-#else  /* !PREFER_NUMERICAL_STABILITY_OVER_SPEED */
-	return 1.f / (1.f + exp(-x));
-#endif	/* PREFER_NUMERICAL_STABILITY_OVER_SPEED */
-}
-
-static double
-sigma(double x)
-{
-#if defined PREFER_NUMERICAL_STABILITY_OVER_SPEED
-	return (1. + tanh(x / 2.)) / 2.;
-#else  /* !PREFER_NUMERICAL_STABILITY_OVER_SPEED */
-	return 1. / (1. + exp(-x));
-#endif	/* PREFER_NUMERICAL_STABILITY_OVER_SPEED */
-}
-
-static long double
-sigmal(long double x)
-{
-#if defined PREFER_NUMERICAL_STABILITY_OVER_SPEED
-	return (1.L + tanh(x / 2.L)) / 2.L;
-#else  /* !PREFER_NUMERICAL_STABILITY_OVER_SPEED */
-	return 1.L / (1.L + exp(-x));
-#endif	/* PREFER_NUMERICAL_STABILITY_OVER_SPEED */
-}
-
-static void
-softmaxf(float *restrict tgt, const float *src, size_t z)
-{
-#if defined PREFER_NUMERICAL_STABILITY_OVER_SPEED
-	float max = -INFINITY;
-	float sm = 0.f;
-
-	for (size_t i = 0; i < z; i++) {
-		if (src[i] > max) {
-			max = src[i];
-		}
-	}
-	for (size_t i = 0; i < z; i++) {
-		sm += exp(src[i] - max);
-	}
-	with (const float lgsm = log(sm) + max) {
-		for (size_t i = 0; i < z; i++) {
-			tgt[i] = exp(src[i] - lgsm);
-		}
-	}
-	return;
-#else  /* !PREFER_NUMERICAL_STABILITY_OVER_SPEED */
-	float sm = 0.f;
-
-	for (size_t i = 0; i < z; i++) {
-		sm += tgt[i] = exp(src[i]);
-	}
-	for (size_t i = 0; i < z; i++) {
-		tgt[i] = tgt[i] / sm;
-	}
-	return;
-#endif	/* PREFER_NUMERICAL_STABILITY_OVER_SPEED */
-}
-
-/* my own tgmaths */
-#define poiss(x, n)	__TGMATH_BINARY_FIRST_REAL_ONLY(x, n, poiss)
-#define sigma(x)	__TGMATH_UNARY_REAL_ONLY(x, sigma)
 
 
 /* my alibi blas */
@@ -728,7 +551,7 @@ expt_vis(float *restrict v, dl_rbm_t m, const float vis[static m->nvis])
 	DEBUG(dump_layer("Va", vis, nvis));
 
 #if defined SALAKHUTDINOV
-	softmaxf(v, vis, nvis);
+	softmax(v, vis, nvis);
 	with (const float scal = (float)N) {
 		for (size_t i = 0; i < nvis; i++) {
 			v[i] *= scal;
