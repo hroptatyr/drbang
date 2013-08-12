@@ -830,9 +830,13 @@ rset_drbctx(struct drbctx_s *tgt)
 	return;
 }
 
+#if defined __SSE__ && defined DEFER_UPDATES && 0
+/* this version is slower than the sequential one */
 static ni void
-update_w(drbctx_t ctx)
+sse_update_w(drbctx_t ctx)
 {
+#define f4z		sizeof(float) * 4U
+	typedef float f4 __attribute__((aligned(f4z), vector_size(f4z)));
 	dl_rbm_t m = ctx->m;
 	const float *vo = ctx->vo;
 	const float *ho = ctx->ho;
@@ -840,14 +844,84 @@ update_w(drbctx_t ctx)
 	const float *hr = ctx->hr;
 	const size_t nv = m->nvis;
 	const size_t nh = m->nhid;
+	float *restrict dw = ctx->dw;
+	const float *w = m->w;
 #if !defined NDEBUG
 	float mind = INFINITY;
 	float maxd = -INFINITY;
 #endif	/* !NDEBUG */
 
-#define w(i, j)		m->w[i * nh + j]
-#define wtr(i, j)	((struct dl_rbm_priv_s*)m->priv)->wtr[i * nv + j]
-#define dw(i, j)	ctx->dw[i * nh + j]
+#define w(i, j)		(w + i * nh + j)
+#define dw(i, j)	(dw + i * nh + j)
+
+	/* bang <v_i h_j> into weights */
+	for (size_t i = 0; i < nv; i++) {
+		for (size_t j = 0; j < nh; j += 4U) {
+			const f4 vo4 = {vo[i], vo[i], vo[i], vo[i]};
+			const f4 ho4 = *(const f4*)(ho + j);
+			const f4 vr4 = {vr[i], vr[i], vr[i], vr[i]};
+			const f4 hr4 = *(const f4*)(hr + j);
+			const f4 vho4 = vo4 * ho4;
+			const f4 vhr4 = vr4 * hr4;
+			f4 d = vho4 - vhr4;
+			static const f4 dec4 = {0.f, 0.f, 0.f, 0.f};
+			static const f4 eta4 = {0.02f, 0.02f, 0.02f, 0.02f};
+			static const f4 mom4 = {0.9f, 0.9f, 0.9f, 0.9f};
+
+			/* decay */
+			d -= dec4 * *(const f4*)w(i, j);
+			/* learning rate */
+			d *= eta4;
+			/* momentum term */
+			d += mom4 * *(const f4*)dw(i, j);
+
+#if !defined NDEBUG && 0
+			if (d < mind) {
+				mind = d;
+			}
+			if (d > maxd) {
+				maxd = d;
+			}
+#endif	/* !NDEBUG */
+			*(f4*)dw(i, j) = d;
+		}
+	}
+#if !defined NDEBUG
+	printf("dw (%.6g  %.6g)\n", mind, maxd);
+#endif	/* !NDEBUG */
+#undef w
+#undef dw
+	return;
+}
+#endif	/* __SSE__ */
+
+static ni void
+update_w(drbctx_t ctx)
+{
+	dl_rbm_t m = ctx->m;
+	const struct dl_rbm_priv_s *p = m->priv;
+	const float *vo = ctx->vo;
+	const float *ho = ctx->ho;
+	const float *vr = ctx->vr;
+	const float *hr = ctx->hr;
+	const size_t nv = m->nvis;
+	const size_t nh = m->nhid;
+	float *restrict dw = ctx->dw;
+#if defined DEFER_UPDATES
+	const float *w = m->w;
+	const float *UNUSED(wtr) = p->wtr;
+#else  /* !DEFER_UPDATES */
+	float *restrict w = m->w;
+	float *restrict wtr = p->wtr;
+#endif	/* DEFER_UPDATES */
+#if !defined NDEBUG
+	float mind = INFINITY;
+	float maxd = -INFINITY;
+#endif	/* !NDEBUG */
+
+#define w(i, j)		w[i * nh + j]
+#define wtr(i, j)	wtr[i * nv + j]
+#define dw(i, j)	dw[i * nh + j]
 
 	/* bang <v_i h_j> into weights */
 	for (size_t i = 0; i < nv; i++) {
