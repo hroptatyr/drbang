@@ -188,6 +188,26 @@ sigmal(long double x)
 #if !defined USE_BLAS
 typedef long int MKL_INT;
 
+#if defined __SSE__
+static ni float
+sse_sdot(const MKL_INT N, const float *X, const float *Y)
+{
+#define f4z		sizeof(float) * 4U
+	typedef float f4 __attribute__((aligned(f4z), vector_size(f4z)));
+	const f4 *X4 = (const f4*)X;
+	const f4 *Y4 = (const f4*)Y;
+	union {
+		f4 v;
+		float f[4U];
+	} sum = {};
+
+	for (MKL_INT i = 0; i < N / 4U; i++, X++, Y++) {
+		sum.v += *X4 * *Y4;
+	}
+	return sum.f[0U] + sum.f[1U] + sum.f[2U] + sum.f[3U];
+}
+#endif	/* __SSE__ */
+
 static ni float
 cblas_sdot(
 	const MKL_INT N,
@@ -196,6 +216,13 @@ cblas_sdot(
 {
 	float sum = 0.f;
 
+#if defined __SSE__
+	if (!(N % 4U) && incX == 1U && incY == 1U) {
+		/* ah, we can use the sse version */
+		return sse_sdot(N, X, Y);
+	}
+#endif	/* __SSE__ */
+	/* otherwise proceed with the bog standard procedure */
 	for (MKL_INT i = 0; i < N; i++, X += incX, Y += incY) {
 		sum += *X * *Y;
 	}
