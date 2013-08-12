@@ -60,6 +60,7 @@ libdrbang_a_SOURCES += nifty.h
 libdrbang_a_SOURCES += rand.c rand.h
 libdrbang_a_SOURCES += rand-taus.c rand-taus.h
 libdrbang_a_SOURCES += rand-ziggurat.c rand-ziggurat.h
+libdrbang_a_SOURCES += maths.c maths.h
 libdrbang_a_SOURCES += version.c version.h
 
 noinst_PROGRAMS += dbn
