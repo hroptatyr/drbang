@@ -63,14 +63,14 @@ libdrbang_a_SOURCES += rand-ziggurat.c rand-ziggurat.h
 libdrbang_a_SOURCES += maths.c maths.h
 libdrbang_a_SOURCES += version.c version.h
 
-noinst_PROGRAMS += dbn
-dbn_SOURCES = dbn-test.c
-dbn_CPPFLAGS = $(AM_CPPFLAGS)
-dbn_CPPFLAGS += -D_GNU_SOURCE
-dbn_LDFLAGS = $(AM_LDFLAGS)
-dbn_LDFLAGS += -static
-dbn_LDADD = libdrbang.a
-BUILT_SOURCES += dbn-test.x dbn-test.xh
+noinst_PROGRAMS += rbm
+rbm_SOURCES = rbm.c
+rbm_CPPFLAGS = $(AM_CPPFLAGS)
+rbm_CPPFLAGS += -D_GNU_SOURCE
+rbm_LDFLAGS = $(AM_LDFLAGS)
+rbm_LDFLAGS += -static
+rbm_LDADD = libdrbang.a
+BUILT_SOURCES += rbm.x rbm.xh
 
 
 version.c: version.c.in $(top_builddir)/version.mk
