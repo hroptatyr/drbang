@@ -830,7 +830,8 @@ rset_drbctx(struct drbctx_s *tgt)
 	return;
 }
 
-#if defined __SSE__ && defined DEFER_UPDATES
+#if defined __SSE__ && defined DEFER_UPDATES && 0
+/* this version is slower than the sequential one */
 static ni void
 sse_update_w(drbctx_t ctx)
 {
@@ -1116,7 +1117,7 @@ train(drbctx_t ctx, struct spsv_s sv)
 
 	/* we won't sample the h reconstruction as we want to use the
 	 * the activations directly */
-	sse_update_w(ctx);
+	update_w(ctx);
 	update_b(ctx);
 
 #if !defined NDEBUG
