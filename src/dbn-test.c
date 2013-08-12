@@ -9,6 +9,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <assert.h>
+#include <setjmp.h>
+#include <signal.h>
 #include "rand.h"
 #include "nifty.h"
 
@@ -1142,12 +1144,29 @@ main(int argc, char *argv[])
 
 	/* from now on we're actually doing something with the machine */
 	static struct drbctx_s ctx[1];
+	static jmp_buf jb;
 	const int fd = STDIN_FILENO;
 	const size_t batchz = argi->batch_size_arg;
+	int jv;
 
 	init_drbctx(ctx, m);
-	if (argi->train_given) {
+	if ((jv = setjmp(jb))) {
+		switch (jv) {
+		case 1U:
+			/* train */
+			goto train_xit;
+		default:
+			break;
+		}
+	} else if (argi->train_given) {
 		size_t i = 0;
+
+		static __attribute__((noreturn)) void si_train(int UNUSED(sig))
+		{
+			longjmp(jb, 1U);
+		}
+
+		signal(SIGINT, si_train);
 		for (spsv_t sv; (sv = read_tf(fd)).z; train(ctx, sv)) {
 			if (++i == batchz) {
 				/* update weights and biasses */
@@ -1157,12 +1176,19 @@ main(int argc, char *argv[])
 				i = 0U;
 			}
 		}
+	train_xit:
+		/* also hopped to by the signal handler */
 		final_update_w(ctx);
 		final_update_b(ctx);
 	} else if (argi->dream_given) {
+		static __attribute__((noreturn)) void si_dream(int UNUSED(sig))
+		{
+			longjmp(jb, 2U);
+		}
+
+		signal(SIGINT, si_dream);
 		for (spsv_t sv; (sv = read_tf(fd)).z; dream(ctx, sv));
 	}
-
 	/* just to deinitialise resources */
 	(void)read_tf(-1);
 	fini_drbctx(ctx);
