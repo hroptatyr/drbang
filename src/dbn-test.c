@@ -788,6 +788,18 @@ fini_drbctx(struct drbctx_s *tgt)
 	return;
 }
 
+static void
+rset_drbctx(struct drbctx_s *tgt)
+{
+	const size_t nv = tgt->m->nvis;
+	const size_t nh = tgt->m->nhid;
+
+	memset(tgt->dw, 0, nv * nh);
+	memset(tgt->dv, 0, nv);
+	memset(tgt->dh, 0, nh);
+	return;
+}
+
 static ni void
 update_w(drbctx_t ctx)
 {
@@ -1131,10 +1143,20 @@ main(int argc, char *argv[])
 	/* from now on we're actually doing something with the machine */
 	static struct drbctx_s ctx[1];
 	const int fd = STDIN_FILENO;
+	const size_t batchz = argi->batch_size_arg;
 
 	init_drbctx(ctx, m);
 	if (argi->train_given) {
-		for (spsv_t sv; (sv = read_tf(fd)).z; train(ctx, sv));
+		size_t i = 0;
+		for (spsv_t sv; (sv = read_tf(fd)).z; train(ctx, sv)) {
+			if (++i == batchz) {
+				/* update weights and biasses */
+				final_update_w(ctx);
+				final_update_b(ctx);
+				rset_drbctx(ctx);
+				i = 0U;
+			}
+		}
 		final_update_w(ctx);
 		final_update_b(ctx);
 	} else if (argi->dream_given) {

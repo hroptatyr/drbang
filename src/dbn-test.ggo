@@ -3,6 +3,10 @@ package "dbn"
 usage "dbn [OPTIONS...]"
 description "Test binary for a deep belief network."
 
+option "batch-size" b
+	"Process updates in blocks of INT."
+	int typestr="INT" default="64" optional
+
 option "create" c
 	"Create a new RBM machine."
 	optional
