@@ -179,6 +179,40 @@ sigmal(long double x)
 #endif	/* PREFER_NUMERICAL_STABILITY_OVER_SPEED */
 }
 
+static void
+softmaxf(float *restrict tgt, const float *src, size_t z)
+{
+#if defined PREFER_NUMERICAL_STABILITY_OVER_SPEED
+	float max = -INFINITY;
+	float sm = 0.f;
+
+	for (size_t i = 0; i < z; i++) {
+		if (src[i] > max) {
+			max = src[i];
+		}
+	}
+	for (size_t i = 0; i < z; i++) {
+		sm += exp(src[i] - max);
+	}
+	with (const float lgsm = log(sm) + max) {
+		for (size_t i = 0; i < z; i++) {
+			tgt[i] = exp(src[i] - lgsm);
+		}
+	}
+	return;
+#else  /* !PREFER_NUMERICAL_STABILITY_OVER_SPEED */
+	float sm = 0.f;
+
+	for (size_t i = 0; i < z; i++) {
+		sm += tgt[i] = exp(src[i]);
+	}
+	for (size_t i = 0; i < z; i++) {
+		tgt[i] = tgt[i] / sm;
+	}
+	return;
+#endif	/* PREFER_NUMERICAL_STABILITY_OVER_SPEED */
+}
+
 /* my own tgmaths */
 #define poiss(x, n)	__TGMATH_BINARY_FIRST_REAL_ONLY(x, n, poiss)
 #define sigma(x)	__TGMATH_UNARY_REAL_ONLY(x, sigma)
@@ -688,27 +722,14 @@ static ni int
 expt_vis(float *restrict v, dl_rbm_t m, const float vis[static m->nvis])
 {
 	const size_t nvis = m->nvis;
-#if defined SALAKHUTDINOV
-	float max = -INFINITY;
-	float nor = 0.f;
-#endif	/* SALAKHUTDINOV */
 
 	DEBUG(dump_layer("Va", vis, nvis));
 
 #if defined SALAKHUTDINOV
-	/* calc log softmax first */
-	for (size_t i = 0; i < nvis; i++) {
-		if (vis[i] > max) {
-			max = vis[i];
-		}
-	}
-	/* calc \sum exp(v) */
-	for (size_t i = 0; i < nvis; i++) {
-		nor += exp(vis[i] - max);
-	}
-	with (const float lgsm = log(nor) + max) {
+	softmaxf(v, vis, nvis);
+	with (const float scal = (float)N) {
 		for (size_t i = 0; i < nvis; i++) {
-			v[i] = exp(v[i] - lgsm) * N;
+			v[i] *= scal;
 		}
 	}
 #elif defined GEHLER
