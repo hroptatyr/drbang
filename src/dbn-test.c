@@ -187,21 +187,45 @@ sigmal(long double x)
 /* my alibi blas */
 #if !defined USE_BLAS
 typedef long int MKL_INT;
+#endif	/* !USE_BLAS */
+
+#if defined __SSE__
+static ni float
+sse_sdot(const MKL_INT N, const float *X, const float *Y)
+{
+#define f4z		sizeof(float) * 4U
+	typedef float f4 __attribute__((aligned(f4z), vector_size(f4z)));
+	const f4 *X4 = (const f4*)X;
+	const f4 *Y4 = (const f4*)Y;
+	union {
+		f4 v;
+		float f[4U];
+	} sum = {};
+
+	for (MKL_INT i = 0; i < N / 4U; i++, X++, Y++) {
+		sum.v += *X4 * *Y4;
+	}
+	return sum.f[0U] + sum.f[1U] + sum.f[2U] + sum.f[3U];
+}
+#endif	/* __SSE__ */
 
 static ni float
-cblas_sdot(
-	const MKL_INT N,
-	const float *X, const MKL_INT incX,
-	const float *Y, const MKL_INT incY)
+drb_sdot11(const MKL_INT N, const float *X, const float *Y)
 {
 	float sum = 0.f;
 
-	for (MKL_INT i = 0; i < N; i++, X += incX, Y += incY) {
+#if defined __SSE__
+	if (!(N % 4U)) {
+		/* ah, we can use the sse version */
+		return sse_sdot(N, X, Y);
+	}
+#endif	/* __SSE__ */
+	/* otherwise proceed with the bog standard procedure */
+	for (MKL_INT i = 0; i < N; i++, X++, Y++) {
 		sum += *X * *Y;
 	}
 	return sum;
 }
-#endif	/* !USE_BLAS */
 
 static ni float*
 tr(const float *w, const MKL_INT m, const MKL_INT n)
@@ -607,7 +631,7 @@ prop_up(float *restrict h, dl_rbm_t m, const float vis[static m->nvis])
 
 #define w(j)		(wtr + j * nvis)
 	for (size_t j = 0; j < nhid; j++) {
-		h[j] = b[j] + cblas_sdot(nvis, w(j), 1U, vis, 1U);
+		h[j] = b[j] + drb_sdot11(nvis, w(j), vis);
 	}
 #undef w
 	return 0;
@@ -654,7 +678,7 @@ prop_down(float *restrict v, dl_rbm_t m, const float hid[static m->nhid])
 
 #define w(i)		(w + i * nhid)
 	for (size_t i = 0; i < nvis; i++) {
-		v[i] = b[i] + cblas_sdot(nhid, w(i), 1U, hid, 1U);
+		v[i] = b[i] + drb_sdot11(nhid, w(i), hid);
 	}
 #undef w
 	return 0;
