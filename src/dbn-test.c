@@ -689,19 +689,26 @@ expt_vis(float *restrict v, dl_rbm_t m, const float vis[static m->nvis])
 {
 	const size_t nvis = m->nvis;
 #if defined SALAKHUTDINOV
+	float max = -INFINITY;
 	float nor = 0.f;
 #endif	/* SALAKHUTDINOV */
 
 	DEBUG(dump_layer("Va", vis, nvis));
 
 #if defined SALAKHUTDINOV
+	/* calc log softmax first */
+	for (size_t i = 0; i < nvis; i++) {
+		if (vis[i] > max) {
+			max = vis[i];
+		}
+	}
 	/* calc \sum exp(v) */
 	for (size_t i = 0; i < nvis; i++) {
-		nor += v[i] = exp(vis[i]);
+		nor += exp(vis[i] - max);
 	}
-	with (const float norm = (float)N / nor) {
+	with (const float lgsm = log(nor) + max) {
 		for (size_t i = 0; i < nvis; i++) {
-			v[i] = v[i] * norm;
+			v[i] = exp(v[i] - lgsm) * N;
 		}
 	}
 #elif defined GEHLER
