@@ -65,6 +65,7 @@ libdrbang_a_SOURCES += version.c version.h
 
 noinst_PROGRAMS += rbm
 rbm_SOURCES = rbm.c
+rbm_SOURCES += rbm.ggo
 rbm_CPPFLAGS = $(AM_CPPFLAGS)
 rbm_CPPFLAGS += -D_GNU_SOURCE
 rbm_LDFLAGS = $(AM_LDFLAGS)

@@ -1023,75 +1023,73 @@ check(dl_rbm_t m)
 # pragma warning (disable:593)
 # pragma warning (disable:181)
 #endif	/* __INTEL_COMPILER */
-#include "dbn-test.xh"
-#include "dbn-test.x"
+#include "rbm.xh"
+#include "rbm.x"
 #if defined __INTEL_COMPILER
 # pragma warning (default:593)
 # pragma warning (default:181)
 #endif	/* __INTEL_COMPILER */
 
-int
-main(int argc, char *argv[])
+static int
+cmd_init(struct glod_args_info argi[static 1])
 {
-	struct glod_args_info argi[1];
+	struct dl_file_s ini = {
+		.nvis = 256U,
+		.nhid = 256U,
+	};
+	const char *file = argi->inputs[1U];
 	dl_rbm_t m = NULL;
 	int res = 0;
 
-	if (glod_parser(argc, argv, argi)) {
+	/* just create the machine */
+	if (argi->inputs_num < 2) {
+		fputs("no machine file given\n", stderr);
 		res = 1;
-		goto out;
-	}
-
-	init_rand();
-	if (argi->create_given) {
-		struct dl_file_s ini = {
-			.nvis = 32768U + 4096U,
-			.nhid = 256U,
-		};
-
-		/* just create the machine */
-		if ((m = crea("test.rbm", ini)) == NULL) {
-			res = 1;
-		}
-		goto wrout;
-	}
-	/* all other options need the machine file */
-	/* read the machine file */
-	if (UNLIKELY((m = pump("test.rbm")) == NULL)) {
+	} else if ((m = crea(file, ini)) == NULL) {
+		fprintf(stderr, "error creating machine file `%s'\n", file);
 		res = 1;
-		goto wrout;
 	}
+	return res;
+}
 
-	if (argi->check_given) {
-		res = check(m);
-		goto wrout;
-	}
-
-	/* from now on we're actually doing something with the machine */
-	static struct drbctx_s ctx[1];
+static int
+cmd_train(struct glod_args_info argi[static 1])
+{
 	static jmp_buf jb;
-	const int fd = STDIN_FILENO;
-	const size_t batchz = argi->batch_size_arg;
-	int jv;
+	const char *file = argi->inputs[1U];
+	dl_rbm_t m = NULL;
+	int res = 0;
 
-	init_drbctx(ctx, m);
-	if ((jv = setjmp(jb))) {
-		switch (jv) {
-		case 1U:
-			/* train */
-			goto train_xit;
-		default:
-			break;
-		}
-	} else if (argi->train_given) {
+	if (argi->inputs_num < 2) {
+		fputs("no machine file given\n", stderr);
+		res = 1;
+
+	} else if (UNLIKELY((m = pump(file)) == NULL)) {
+		/* reading the machine file failed */
+		fprintf(stderr, "error opening machine file `%s'\n", file);
+		res = 1;
+
+	} else if (setjmp(jb)) {
+		/* C-c handler */
+		goto train_xit;
+
+	} else {
+		/* all clear */
+		static struct drbctx_s ctx[1];
+		const int fd = STDIN_FILENO;
+		const size_t batchz = argi->batch_size_arg;
 		size_t i = 0;
 
+		/* set up C-c handling (dirtee) */
 		static __attribute__((noreturn)) void si_train(int UNUSED(sig))
 		{
 			longjmp(jb, 1U);
 		}
-
 		signal(SIGINT, si_train);
+
+		init_rand();
+		init_drbctx(ctx, m);
+
 		for (spsv_t sv; (sv = read_tf(fd)).z; train(ctx, sv)) {
 			if (++i == batchz) {
 				/* update weights and biasses */
@@ -1105,21 +1103,101 @@ main(int argc, char *argv[])
 		/* also hopped to by the signal handler */
 		final_update_w(ctx);
 		final_update_b(ctx);
-	} else if (argi->dream_given) {
-		static __attribute__((noreturn)) void si_dream(int UNUSED(sig))
+
+		/* just to deinitialise resources */
+		(void)read_tf(-1);
+		fini_drbctx(ctx);
+		dump(m);
+		deinit_rand();
+	}
+	return res;
+}
+
+static int
+cmd_prop(struct glod_args_info argi[static 1])
+{
+	static jmp_buf jb;
+	const char *file = argi->inputs[1U];
+	dl_rbm_t m = NULL;
+	int res = 0;
+
+	if (argi->inputs_num < 2) {
+		fputs("no machine file given\n", stderr);
+		res = 1;
+
+	} else if (UNLIKELY((m = pump(file)) == NULL)) {
+		/* reading the machine file failed */
+		fprintf(stderr, "error opening machine file `%s'\n", file);
+		res = 1;
+
+	} else if (setjmp(jb)) {
+		/* C-c handler */
+		goto prop_xit;
+
+	} else {
+		/* all clear */
+		static struct drbctx_s ctx[1];
+		const int fd = STDIN_FILENO;
+
+		/* set up the C-c handler */
+		static __attribute__((noreturn)) void si_prop(int UNUSED(sig))
 		{
 			longjmp(jb, 2U);
 		}
+		signal(SIGINT, si_prop);
 
-		signal(SIGINT, si_dream);
+		init_rand();
+		init_drbctx(ctx, m);
+
 		for (spsv_t sv; (sv = read_tf(fd)).z; dream(ctx, sv));
+
+	prop_xit:
+		/* just to deinitialise resources */
+		(void)read_tf(-1);
+		fini_drbctx(ctx);
+		dump(m);
+		deinit_rand();
 	}
-	/* just to deinitialise resources */
-	(void)read_tf(-1);
-	fini_drbctx(ctx);
-wrout:
-	deinit_rand();
-	dump(m);
+
+	return res;
+}
+
+
+int
+main(int argc, char *argv[])
+{
+	struct glod_args_info argi[1];
+	int res = 0;
+
+	if (glod_parser(argc, argv, argi)) {
+		res = 1;
+		goto out;
+	} else if (argi->inputs_num < 1) {
+		glod_parser_print_help();
+		res = 1;
+		goto out;
+	}
+
+	/* check the command */
+	with (const char *cmd = argi->inputs[0]) {
+		if (!strcmp(cmd, "train")) {
+			res = cmd_train(argi);
+
+		} else if (!strcmp(cmd, "prop")) {
+			res = cmd_prop(argi);
+
+		} else if (!strcmp(cmd, "init")) {
+			res = cmd_init(argi);
+
+		} else if (!strcmp(cmd, "info")) {
+			;
+		} else {
+			/* otherwise print help and bugger off */
+			glod_parser_print_help();
+			res = 1;
+		}
+	}
+
 out:
 	glod_parser_free(argi);
 	return res;
