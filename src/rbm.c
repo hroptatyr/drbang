@@ -1023,8 +1023,8 @@ check(dl_rbm_t m)
 # pragma warning (disable:593)
 # pragma warning (disable:181)
 #endif	/* __INTEL_COMPILER */
-#include "dbn-test.xh"
-#include "dbn-test.x"
+#include "rbm.xh"
+#include "rbm.x"
 #if defined __INTEL_COMPILER
 # pragma warning (default:593)
 # pragma warning (default:181)
