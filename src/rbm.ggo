@@ -1,24 +1,23 @@
 args "--unamed-opts --no-handle-error --long-help -a glod_args_info -f glod_parser"
-package "dbn"
-usage "dbn [OPTIONS...]"
-description "Test binary for a deep belief network."
+package "rbm"
+usage "rbm [OPTIONS...] COMMAND [MACHINE_FILEs...]"
+description "Control drbang machines."
+
+section "Commands:
+
+init    Initialise a network.
+train   Train the network between the layers in the rbm.
+prop    Propagate the input to the output layer.
+info    Output basic info about the rbm network.
+
+Options common to all commands"
+
+option "verbose" v
+	"Be verbose."
+	optional
+
+section "Options affecting train command"
 
 option "batch-size" b
 	"Process updates in blocks of INT."
 	int typestr="INT" default="64" optional
-
-option "create" c
-	"Create a new RBM machine."
-	optional
-
-option "train" -
-	"Use stdin data as training data."
-	optional
-
-option "dream" -
-	"Reconstruct input using the network."
-	optional
-
-option "check" -
-	"Check internal structure of network."
-	optional
