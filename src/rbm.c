@@ -295,7 +295,7 @@ resz(dl_rbm_t m, struct dl_spec_s nu)
 	with (struct dl_file_s *fp = nu_f.fb.d, *op = ol_f.fb.d) {
 		const float vnois = .1f;
 		const float hnois = .01f;
-		const float wnois = 1.f / (m->nvis * m->nhid);
+		const float wnois = 1.f / (nu.nvis * nu.nhid);
 		/* sp is our source pointer (in the private map) */
 		const float_t *sp = op->data + op->off;
 		/* dp is our target pointer in the truncated file */
