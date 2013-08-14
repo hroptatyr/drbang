@@ -1119,22 +1119,44 @@ check(dl_rbm_t m)
 static int
 cmd_init(struct glod_args_info argi[static 1])
 {
-	struct dl_spec_s ini = {
-		.nvis = 256U,
-		.nhid = 256U,
-	};
+/* shell return codes, 0 success, 1 failure */
 	const char *file = argi->inputs[1U];
-	dl_rbm_t m = NULL;
+	struct dl_spec_s dim;
+	dl_rbm_t m;
 	int res = 0;
 
-	/* just create the machine */
+	/* parse dimens */
+	with (char *chk = argi->dimen_arg) {
+		dim.nvis = strtoul(chk, &chk, 0);
+		if ((*chk++ | 0x20) != 'x') {
+			res = 1;
+			goto out;
+		}
+		dim.nhid = strtoul(chk, &chk, 0);
+		if (*chk) {
+			res = 1;
+			goto out;
+		}
+	}
+
+	/* just create (or resize) the machine */
 	if (argi->inputs_num < 2) {
 		fputs("no machine file given\n", stderr);
 		res = 1;
-	} else if ((m = crea(file, ini)) == NULL) {
+	} else if (!argi->resize_given && (m = crea(file, dim)) == NULL) {
 		fprintf(stderr, "error creating machine file `%s'\n", file);
 		res = 1;
+	} else if (argi->resize_given && (m = pump(file)) == NULL) {
+		fprintf(stderr, "error loading machine file `%s'\n", file);
+		res = 1;
+	} else if (argi->resize_given && resz(m, dim) < 0) {
+		/* actually do resize now (in --resize mode) */
+		res = 1;
+	} else {
+		/* for both cases, write the file to disk */
+		res = dump(m);
 	}
+out:
 	return res;
 }
 
@@ -1248,32 +1270,6 @@ cmd_prop(struct glod_args_info argi[static 1])
 	return res;
 }
 
-static int
-cmd_resz(struct glod_args_info argi[static 1])
-{
-	struct dl_spec_s nu = {
-		.nvis = 4096U,
-		.nhid = 256U,
-	};
-	const char *file = argi->inputs[1U];
-	dl_rbm_t m = NULL;
-	int res = 0;
-
-	if (argi->inputs_num < 2) {
-		fputs("no machine file given\n", stderr);
-		res = 1;
-
-	} else if (UNLIKELY((m = pump(file)) == NULL)) {
-		/* reading the machine file failed */
-		fprintf(stderr, "error opening machine file `%s'\n", file);
-		res = 1;
-	} else {
-		resz(m, nu);
-		dump(m);
-	}
-	return res;
-}
-
 
 int
 main(int argc, char *argv[])
@@ -1303,9 +1299,6 @@ main(int argc, char *argv[])
 
 		} else if (!strcmp(cmd, "info")) {
 			;
-
-		} else if (!strcmp(cmd, "resz")) {
-			res = cmd_resz(argi);
 
 		} else {
 			/* otherwise print help and bugger off */
