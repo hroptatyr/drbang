@@ -16,6 +16,16 @@ option "verbose" v
 	"Be verbose."
 	optional
 
+section "Options affecting the init command"
+
+option "dimen" d
+	"Use VIS visible and HID hidden neurons."
+	string typestr="VISxHID" default="256x256" optional
+
+option "resize" r
+	"Instead of initialising a new machine, resize an existing one."
+	optional
+
 section "Options affecting train command"
 
 option "batch-size" b

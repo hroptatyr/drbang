@@ -119,11 +119,11 @@ struct glodfn_s {
 };
 
 static inline glodf_t
-mmap_fd(int fd, size_t fz)
+mmap_fd(int fd, size_t fz, int prot, int flags)
 {
 	void *p;
 
-	p = mmap(NULL, fz, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	p = mmap(NULL, fz, prot, flags, fd, 0);
 	if (p == MAP_FAILED) {
 		return (glodf_t){.z = 0U, .d = NULL};
 	}
@@ -139,6 +139,8 @@ munmap_fd(glodf_t map)
 static glodfn_t
 mmap_fn(const char *fn, int flags)
 {
+	const int fl = MAP_SHARED;
+	const int pr = PROT_READ | (flags & O_RDWR) ? PROT_WRITE : 0;
 	struct stat st;
 	glodfn_t res;
 
@@ -147,7 +149,7 @@ mmap_fn(const char *fn, int flags)
 	} else if (fstat(res.fd, &st) < 0) {
 		res.fb = (glodf_t){.z = 0U, .d = NULL};
 		goto clo;
-	} else if ((res.fb = mmap_fd(res.fd, st.st_size)).d == NULL) {
+	} else if ((res.fb = mmap_fd(res.fd, st.st_size, pr, fl)).d == NULL) {
 	clo:
 		close(res.fd);
 		res.fd = -1;
@@ -155,7 +157,7 @@ mmap_fn(const char *fn, int flags)
 	return res;
 }
 
-static __attribute__((unused)) int
+static int
 munmap_fn(glodfn_t f)
 {
 	int rc = 0;
@@ -167,6 +169,20 @@ munmap_fn(glodfn_t f)
 		rc += close(f.fd);
 	}
 	return rc;
+}
+
+static glodfn_t
+mremap_fn(glodfn_t f, int nu_flags)
+{
+	const int nu_prot = PROT_READ;
+
+	if (UNLIKELY(f.fb.d == NULL)) {
+		return (glodfn_t){.fd = -1};
+	}
+	/* first munmap the old buffer */
+	munmap_fd(f.fb);
+	f.fb = mmap_fd(f.fd, f.fb.z, nu_prot, nu_flags);
+	return f;
 }
 
 
@@ -183,11 +199,15 @@ struct dl_rbm_s {
 	void *priv;
 };
 
+struct dl_spec_s {
+	size_t nvis;
+	size_t nhid;
+};
+
 struct dl_file_s {
 	uint8_t magic[4U];
 	uint8_t flags[4U];
-	size_t nvis;
-	size_t nhid;
+	struct dl_spec_s sp;
 
 	/* offset to the beginning */
 	size_t off;
@@ -214,17 +234,17 @@ pump(const char *file)
 	with (struct dl_file_s *fl = p->f.fb.d) {
 		float_t *dp = fl->data + fl->off;
 
-		res.nvis = fl->nvis;
+		res.nvis = fl->sp.nvis;
 		res.vbias = dp;
-		dp += fl->nvis;
+		dp += fl->sp.nvis;
 
-		res.nhid = fl->nhid;
+		res.nhid = fl->sp.nhid;
 		res.hbias = dp;
-		dp += fl->nhid;
+		dp += fl->sp.nhid;
 
 		res.w = dp;
 
-		p->wtr = tr(res.w, fl->nvis, fl->nhid);
+		p->wtr = tr(res.w, fl->sp.nvis, fl->sp.nhid);
 	}
 	res.priv = p;
 	return &res;
@@ -245,58 +265,118 @@ dump(dl_rbm_t m)
 	return munmap_fn(p->f);
 }
 
-static dl_rbm_t
-crea(const char *file, struct dl_file_s fs)
+static int
+resz(dl_rbm_t m, struct dl_spec_s nu)
 {
-	static glodfn_t f;
+/* shrink or expand the machine in M according to dimensions in NU */
+	const int pr = PROT_READ | PROT_WRITE;
+	const int fl = MAP_SHARED;
+	struct dl_rbm_priv_s *p = m->priv;
+	glodfn_t ol_f;
+	glodfn_t nu_f;
 	size_t z;
 	size_t fz;
+	int res = 0;
+
+	/* remap the current guy */
+	ol_f = mremap_fn(p->f, MAP_PRIVATE);
+
+	/* compute new file size */
+	z = nu.nvis + nu.nhid + nu.nvis * nu.nhid;
+	ftruncate(ol_f.fd, fz = z * sizeof(float) + sizeof(nu));
+
+	if (UNLIKELY((nu_f.fb = mmap_fd(ol_f.fd, fz, pr, fl)).d == NULL)) {
+		res = -1;
+		goto out;
+	}
+	nu_f.fd = ol_f.fd;
+
+	/* just copy the file header over */
+	with (struct dl_file_s *fp = nu_f.fb.d, *op = ol_f.fb.d) {
+		const float vnois = .1f;
+		const float hnois = .01f;
+		const float wnois = 1.f / (nu.nvis * nu.nhid);
+		/* sp is our source pointer (in the private map) */
+		const float_t *sp = op->data + op->off;
+		/* dp is our target pointer in the truncated file */
+		float_t *restrict dp = fp->data + fp->off;
+
+		/* vbiasses */
+		memcpy(m->vbias = dp, sp, op->sp.nvis * sizeof(*sp));
+		dp += m->nvis = nu.nvis;
+		sp += op->sp.nvis;
+		/* wobble */
+		for (size_t i = op->sp.nvis; i < m->nvis; i++) {
+			const float x = dr_rand_uni();
+			m->vbias[i] = log(vnois * x);
+		}
+
+		/* hbiasses */
+		memcpy(m->hbias = dp, sp, op->sp.nhid * sizeof(*sp));
+		dp += m->nhid = nu.nhid;
+		sp += op->sp.nhid;
+		/* wobble */
+		for (size_t j = op->sp.nhid; j < m->nhid; j++) {
+			const float x = dr_rand_norm();
+			m->hbias[j] = hnois * x;
+		}
+
+		/* weight matrix */
+		memcpy(m->w = dp, sp, op->sp.nvis * op->sp.nhid * sizeof(*sp));
+		/* wobble */
+		for (size_t k = op->sp.nvis * op->sp.nhid;
+		     k < m->nvis * m->nhid; k++) {
+			const float x = dr_rand_norm();
+			m->w[k] = wnois * x;
+		}
+
+		/* recalc the transposed of w */
+		free(p->wtr);
+		p->wtr = tr(m->w, nu.nvis, nu.nhid);
+
+		/* assign the new size */
+		fp->sp = nu;
+	}
+	p->f = nu_f;
+
+out:
+	munmap_fd(ol_f.fb);
+	return res;
+}
+
+static dl_rbm_t
+crea(const char *file, struct dl_spec_s sp)
+{
+	static glodfn_t f;
+	const int pr = PROT_READ | PROT_WRITE;
+	const int fl = MAP_SHARED;
+	size_t fz;
 	int fd;
+	dl_rbm_t res;
 
 	if (UNLIKELY((fd = open(file, O_CREAT | O_RDWR | O_TRUNC, 0666)) < 0)) {
 		return NULL;
 	}
 	/* compute total file size */
-	z = fs.nvis + fs.nhid + fs.nvis * fs.nhid;
-	ftruncate(fd, fz = z * sizeof(float) + sizeof(fs));
+	ftruncate(fd, fz = sizeof(struct dl_file_s));
 
-	if (UNLIKELY((f.fb = mmap_fd(f.fd = fd, fz)).d == NULL)) {
+	if (UNLIKELY((f.fb = mmap_fd(f.fd = fd, fz, pr, fl)).d == NULL)) {
 		goto out;
 	}
-	/* just copy the file header over */
-	fs.off = 0U;
-	memcpy(f.fb.d, &fs, sizeof(fs));
-
+	/* normally we'd fill in titbits like our magic string and flags */
+	;
 	munmap_fn(f);
-	with (dl_rbm_t m = pump(file)) {
-		const float vnois = .1f;
-		const float hnois = .01f;
-		const float wnois = 1.f / (m->nvis * m->nhid);
 
-		/* wobble vbiasses */
-		for (size_t i = 0; i < m->nvis; i++) {
-			const float x = dr_rand_uni();
-			m->vbias[i] = log(vnois * x);
-		}
-
-		/* wobble hbiasses */
-		for (size_t j = 0; j < m->nhid; j++) {
-			const float x = dr_rand_norm();
-			m->hbias[j] = hnois * x;
-		}
-
-		/* wobble weights */
-		for (size_t k = 0; k < m->nvis * m->nhid; k++) {
-			const float x = dr_rand_norm();
-			m->w[k] = wnois * x;
-		}
-
-		/* and wobble the transpose too */
-		with (struct dl_rbm_priv_s *p = m->priv) {
-			p->wtr = tr(m->w, m->nvis, m->nhid);
-		}
-		return m;
+	/* now let pump() and resz() do the rest */
+	if ((res = pump(file)) == NULL) {
+		/* nawww */
+		goto out;
+	} else if (resz(res, sp) < 0) {
+		/* shame */
+		goto out;
 	}
+	/* all's good */
+	return res;
 
 out:
 	close(fd);
@@ -394,6 +474,12 @@ popul_sv(float *restrict x, size_t z, const spsv_t sv)
 	for (size_t j = 0; j < sv.z; j++) {
 		size_t i = sv.v[j].i;
 		uint8_t c = sv.v[j].v;
+
+		if (UNLIKELY(i >= z)) {
+			fprintf(stderr, "\
+not populating entry %zu, machine's network too small\n", i);
+			continue;
+		}
 
 		res += c;
 		x[i] = (float)(int)c;
@@ -1033,22 +1119,44 @@ check(dl_rbm_t m)
 static int
 cmd_init(struct glod_args_info argi[static 1])
 {
-	struct dl_file_s ini = {
-		.nvis = 256U,
-		.nhid = 256U,
-	};
+/* shell return codes, 0 success, 1 failure */
 	const char *file = argi->inputs[1U];
-	dl_rbm_t m = NULL;
+	struct dl_spec_s dim;
+	dl_rbm_t m;
 	int res = 0;
 
-	/* just create the machine */
+	/* parse dimens */
+	with (char *chk = argi->dimen_arg) {
+		dim.nvis = strtoul(chk, &chk, 0);
+		if ((*chk++ | 0x20) != 'x') {
+			res = 1;
+			goto out;
+		}
+		dim.nhid = strtoul(chk, &chk, 0);
+		if (*chk) {
+			res = 1;
+			goto out;
+		}
+	}
+
+	/* just create (or resize) the machine */
 	if (argi->inputs_num < 2) {
 		fputs("no machine file given\n", stderr);
 		res = 1;
-	} else if ((m = crea(file, ini)) == NULL) {
+	} else if (!argi->resize_given && (m = crea(file, dim)) == NULL) {
 		fprintf(stderr, "error creating machine file `%s'\n", file);
 		res = 1;
+	} else if (argi->resize_given && (m = pump(file)) == NULL) {
+		fprintf(stderr, "error loading machine file `%s'\n", file);
+		res = 1;
+	} else if (argi->resize_given && resz(m, dim) < 0) {
+		/* actually do resize now (in --resize mode) */
+		res = 1;
+	} else {
+		/* for both cases, write the file to disk */
+		res = dump(m);
 	}
+out:
 	return res;
 }
 
@@ -1191,6 +1299,7 @@ main(int argc, char *argv[])
 
 		} else if (!strcmp(cmd, "info")) {
 			;
+
 		} else {
 			/* otherwise print help and bugger off */
 			glod_parser_print_help();
