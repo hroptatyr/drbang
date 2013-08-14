@@ -348,57 +348,35 @@ static dl_rbm_t
 crea(const char *file, struct dl_spec_s sp)
 {
 	static glodfn_t f;
-	static struct dl_file_s fs;
 	const int pr = PROT_READ | PROT_WRITE;
 	const int fl = MAP_SHARED;
-	size_t z;
 	size_t fz;
 	int fd;
+	dl_rbm_t res;
 
 	if (UNLIKELY((fd = open(file, O_CREAT | O_RDWR | O_TRUNC, 0666)) < 0)) {
 		return NULL;
 	}
 	/* compute total file size */
-	z = sp.nvis + sp.nhid + sp.nvis * sp.nhid;
-	ftruncate(fd, fz = z * sizeof(float) + sizeof(fs));
+	ftruncate(fd, fz = sizeof(struct dl_file_s));
 
 	if (UNLIKELY((f.fb = mmap_fd(f.fd = fd, fz, pr, fl)).d == NULL)) {
 		goto out;
 	}
-	/* just copy the file header over */
-	fs.sp = sp;
-	memcpy(f.fb.d, &fs, sizeof(fs));
-
+	/* normally we'd fill in titbits like our magic string and flags */
+	;
 	munmap_fn(f);
-	with (dl_rbm_t m = pump(file)) {
-		const float vnois = .1f;
-		const float hnois = .01f;
-		const float wnois = 1.f / (m->nvis * m->nhid);
 
-		/* wobble vbiasses */
-		for (size_t i = 0; i < m->nvis; i++) {
-			const float x = dr_rand_uni();
-			m->vbias[i] = log(vnois * x);
-		}
-
-		/* wobble hbiasses */
-		for (size_t j = 0; j < m->nhid; j++) {
-			const float x = dr_rand_norm();
-			m->hbias[j] = hnois * x;
-		}
-
-		/* wobble weights */
-		for (size_t k = 0; k < m->nvis * m->nhid; k++) {
-			const float x = dr_rand_norm();
-			m->w[k] = wnois * x;
-		}
-
-		/* and wobble the transpose too */
-		with (struct dl_rbm_priv_s *p = m->priv) {
-			p->wtr = tr(m->w, m->nvis, m->nhid);
-		}
-		return m;
+	/* now let pump() and resz() do the rest */
+	if ((res = pump(file)) == NULL) {
+		/* nawww */
+		goto out;
+	} else if (resz(res, sp) < 0) {
+		/* shame */
+		goto out;
 	}
+	/* all's good */
+	return res;
 
 out:
 	close(fd);
