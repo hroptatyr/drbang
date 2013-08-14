@@ -475,6 +475,12 @@ popul_sv(float *restrict x, size_t z, const spsv_t sv)
 		size_t i = sv.v[j].i;
 		uint8_t c = sv.v[j].v;
 
+		if (UNLIKELY(i >= z)) {
+			fprintf(stderr, "\
+not populating entry %zu, machine's network too small\n", i);
+			continue;
+		}
+
 		res += c;
 		x[i] = (float)(int)c;
 	}
