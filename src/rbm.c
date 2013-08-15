@@ -1270,6 +1270,29 @@ cmd_prop(struct glod_args_info argi[static 1])
 	return res;
 }
 
+static int
+cmd_info(struct glod_args_info argi[static 1])
+{
+	int res = 0;
+
+	for (unsigned int i = 1; i < argi->inputs_num; i++) {
+		const char *f = argi->inputs[i];
+		dl_rbm_t m;
+
+		if ((m = pump(f)) == NULL) {
+			fprintf(stderr, "error opening machine file `%s'\n", f);
+			res = 1;
+		}
+
+		/* just a general overview */
+		printf("%s\t%zux%zu\tpoiss->binary\n", f, m->nvis, m->nhid);
+
+		/* and close the resources assoc'd with m again */
+		dump(m);
+	}
+	return res;
+}
+
 
 int
 main(int argc, char *argv[])
@@ -1298,7 +1321,7 @@ main(int argc, char *argv[])
 			res = cmd_init(argi);
 
 		} else if (!strcmp(cmd, "info")) {
-			;
+			res = cmd_info(argi);
 
 		} else {
 			/* otherwise print help and bugger off */
