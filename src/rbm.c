@@ -140,7 +140,7 @@ static glodfn_t
 mmap_fn(const char *fn, int flags)
 {
 	const int fl = MAP_SHARED;
-	const int pr = PROT_READ | (flags & O_RDWR) ? PROT_WRITE : 0;
+	const int pr = PROT_READ | ((flags & O_RDWR) ? PROT_WRITE : 0);
 	struct stat st;
 	glodfn_t res;
 
@@ -221,12 +221,12 @@ struct dl_rbm_priv_s {
 };
 
 static dl_rbm_t
-pump(const char *file)
+pump(const char *file, int flags)
 {
 	static struct dl_rbm_s res;
 	static struct dl_rbm_priv_s p[1];
 
-	if (UNLIKELY((p->f = mmap_fn(file, O_RDWR)).fd < 0)) {
+	if (UNLIKELY((p->f = mmap_fn(file, flags)).fd < 0)) {
 		goto out;
 	} else if (UNLIKELY(p->f.fb.z < sizeof(struct dl_file_s))) {
 		goto out;
@@ -368,7 +368,7 @@ crea(const char *file, struct dl_spec_s sp)
 	munmap_fn(f);
 
 	/* now let pump() and resz() do the rest */
-	if ((res = pump(file)) == NULL) {
+	if ((res = pump(file, O_RDWR)) == NULL) {
 		/* nawww */
 		goto out;
 	} else if (resz(res, sp) < 0) {
@@ -1040,38 +1040,40 @@ train(drbctx_t ctx, struct spsv_s sv)
 }
 
 static void
-dream(drbctx_t ctx, spsv_t sv)
+prop(drbctx_t ctx, spsv_t sv, int smplp)
 {
 #define m	ctx->m
 #define vo	ctx->vo
 #define ho	ctx->ho
-#define vr	ctx->vr
 	const size_t nv = m->nvis;
+	const size_t nh = m->nhid;
 
 	/* populate from input */
 	N = popul_sv(vo, nv, sv);
 
-	/* vhv gibbs */
+	/* vh gibbs */
 	prop_up(ho, m, vo);
 	expt_hid(ho, m, ho);
-	smpl_hid(ho, m, ho);
-	/* hv gibbs */
-	prop_down(vr, m, ho);
-	expt_vis(vr, m, vr);
-	smpl_vis(vr, m, vr);
+	if (!smplp) {
+		for (size_t i = 0; i < nh; i++) {
+			printf("%g\n", ho[i]);
+		}
+	} else {
+		/* oh, madame wants sampling as well */
+		smpl_hid(ho, m, ho);
 
-	for (size_t i = 0; i < nv; i++) {
-		uint8_t vi = (uint8_t)(int)vr[i];
+		for (size_t i = 0; i < nh; i++) {
+			uint8_t hi = (uint8_t)(int)ho[i];
 
-		if (UNLIKELY(vi)) {
-			printf("%zu\t%u\n", i, (unsigned int)vi);
+			if (UNLIKELY(hi)) {
+				printf("%zu\t%u\n", i, (unsigned int)hi);
+			}
 		}
 	}
 	return;
 #undef m
 #undef vo
 #undef ho
-#undef vr
 }
 
 static int
@@ -1146,7 +1148,7 @@ cmd_init(struct glod_args_info argi[static 1])
 	} else if (!argi->resize_given && (m = crea(file, dim)) == NULL) {
 		fprintf(stderr, "error creating machine file `%s'\n", file);
 		res = 1;
-	} else if (argi->resize_given && (m = pump(file)) == NULL) {
+	} else if (argi->resize_given && (m = pump(file, O_RDWR)) == NULL) {
 		fprintf(stderr, "error loading machine file `%s'\n", file);
 		res = 1;
 	} else if (argi->resize_given && resz(m, dim) < 0) {
@@ -1172,7 +1174,7 @@ cmd_train(struct glod_args_info argi[static 1])
 		fputs("no machine file given\n", stderr);
 		res = 1;
 
-	} else if (UNLIKELY((m = pump(file)) == NULL)) {
+	} else if (UNLIKELY((m = pump(file, O_RDWR)) == NULL)) {
 		/* reading the machine file failed */
 		fprintf(stderr, "error opening machine file `%s'\n", file);
 		res = 1;
@@ -1233,7 +1235,7 @@ cmd_prop(struct glod_args_info argi[static 1])
 		fputs("no machine file given\n", stderr);
 		res = 1;
 
-	} else if (UNLIKELY((m = pump(file)) == NULL)) {
+	} else if (UNLIKELY((m = pump(file, O_RDONLY)) == NULL)) {
 		/* reading the machine file failed */
 		fprintf(stderr, "error opening machine file `%s'\n", file);
 		res = 1;
@@ -1246,6 +1248,7 @@ cmd_prop(struct glod_args_info argi[static 1])
 		/* all clear */
 		static struct drbctx_s ctx[1];
 		const int fd = STDIN_FILENO;
+		const int smplp = argi->sample_given;
 
 		/* set up the C-c handler */
 		static __attribute__((noreturn)) void si_prop(int UNUSED(sig))
@@ -1257,7 +1260,7 @@ cmd_prop(struct glod_args_info argi[static 1])
 		init_rand();
 		init_drbctx(ctx, m);
 
-		for (spsv_t sv; (sv = read_tf(fd)).z; dream(ctx, sv));
+		for (spsv_t sv; (sv = read_tf(fd)).z; prop(ctx, sv, smplp));
 
 	prop_xit:
 		/* just to deinitialise resources */
@@ -1279,7 +1282,7 @@ cmd_info(struct glod_args_info argi[static 1])
 		const char *f = argi->inputs[i];
 		dl_rbm_t m;
 
-		if ((m = pump(f)) == NULL) {
+		if ((m = pump(f, O_RDONLY)) == NULL) {
 			fprintf(stderr, "error opening machine file `%s'\n", f);
 			res = 1;
 		}

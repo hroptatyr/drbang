@@ -31,3 +31,9 @@ section "Options affecting train command"
 option "batch-size" b
 	"Process updates in blocks of INT."
 	int typestr="INT" default="64" optional
+
+section "Options affecting prop command"
+
+option "sample" -
+	"Instead of a deterministic vector, return a stochastic sample."
+	optional
