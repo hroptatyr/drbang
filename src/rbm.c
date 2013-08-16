@@ -1060,14 +1060,20 @@ prop(drbctx_t ctx, spsv_t sv, int smplp)
 		}
 	} else {
 		/* oh, madame wants sampling as well */
+		size_t nsmpl = 0U;
+
 		smpl_hid(ho, m, ho);
 
-		for (size_t i = 0; i < nh; i++) {
+		for (size_t i = 0U; i < nh; i++) {
 			uint8_t hi = (uint8_t)(int)ho[i];
 
 			if (UNLIKELY(hi)) {
 				printf("%zu\t%u\n", i, (unsigned int)hi);
+				nsmpl++;
 			}
+		}
+		if (LIKELY(nsmpl)) {
+			puts("\f");
 		}
 	}
 	return;
