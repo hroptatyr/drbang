@@ -1040,38 +1040,40 @@ train(drbctx_t ctx, struct spsv_s sv)
 }
 
 static void
-dream(drbctx_t ctx, spsv_t sv)
+prop(drbctx_t ctx, spsv_t sv, int smplp)
 {
 #define m	ctx->m
 #define vo	ctx->vo
 #define ho	ctx->ho
-#define vr	ctx->vr
 	const size_t nv = m->nvis;
+	const size_t nh = m->nhid;
 
 	/* populate from input */
 	N = popul_sv(vo, nv, sv);
 
-	/* vhv gibbs */
+	/* vh gibbs */
 	prop_up(ho, m, vo);
 	expt_hid(ho, m, ho);
-	smpl_hid(ho, m, ho);
-	/* hv gibbs */
-	prop_down(vr, m, ho);
-	expt_vis(vr, m, vr);
-	smpl_vis(vr, m, vr);
+	if (!smplp) {
+		for (size_t i = 0; i < nh; i++) {
+			printf("%g\n", ho[i]);
+		}
+	} else {
+		/* oh, madame wants sampling as well */
+		smpl_hid(ho, m, ho);
 
-	for (size_t i = 0; i < nv; i++) {
-		uint8_t vi = (uint8_t)(int)vr[i];
+		for (size_t i = 0; i < nh; i++) {
+			uint8_t hi = (uint8_t)(int)ho[i];
 
-		if (UNLIKELY(vi)) {
-			printf("%zu\t%u\n", i, (unsigned int)vi);
+			if (UNLIKELY(hi)) {
+				printf("%zu\t%u\n", i, (unsigned int)hi);
+			}
 		}
 	}
 	return;
 #undef m
 #undef vo
 #undef ho
-#undef vr
 }
 
 static int
@@ -1246,6 +1248,7 @@ cmd_prop(struct glod_args_info argi[static 1])
 		/* all clear */
 		static struct drbctx_s ctx[1];
 		const int fd = STDIN_FILENO;
+		const int smplp = 0;
 
 		/* set up the C-c handler */
 		static __attribute__((noreturn)) void si_prop(int UNUSED(sig))
@@ -1257,7 +1260,7 @@ cmd_prop(struct glod_args_info argi[static 1])
 		init_rand();
 		init_drbctx(ctx, m);
 
-		for (spsv_t sv; (sv = read_tf(fd)).z; dream(ctx, sv));
+		for (spsv_t sv; (sv = read_tf(fd)).z; prop(ctx, sv, smplp));
 
 	prop_xit:
 		/* just to deinitialise resources */
