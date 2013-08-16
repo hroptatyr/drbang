@@ -140,7 +140,7 @@ static glodfn_t
 mmap_fn(const char *fn, int flags)
 {
 	const int fl = MAP_SHARED;
-	const int pr = PROT_READ | (flags & O_RDWR) ? PROT_WRITE : 0;
+	const int pr = PROT_READ | ((flags & O_RDWR) ? PROT_WRITE : 0);
 	struct stat st;
 	glodfn_t res;
 
