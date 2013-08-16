@@ -1248,7 +1248,7 @@ cmd_prop(struct glod_args_info argi[static 1])
 		/* all clear */
 		static struct drbctx_s ctx[1];
 		const int fd = STDIN_FILENO;
-		const int smplp = 0;
+		const int smplp = argi->sample_given;
 
 		/* set up the C-c handler */
 		static __attribute__((noreturn)) void si_prop(int UNUSED(sig))
