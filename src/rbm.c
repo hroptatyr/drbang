@@ -221,12 +221,12 @@ struct dl_rbm_priv_s {
 };
 
 static dl_rbm_t
-pump(const char *file)
+pump(const char *file, int flags)
 {
 	static struct dl_rbm_s res;
 	static struct dl_rbm_priv_s p[1];
 
-	if (UNLIKELY((p->f = mmap_fn(file, O_RDWR)).fd < 0)) {
+	if (UNLIKELY((p->f = mmap_fn(file, flags)).fd < 0)) {
 		goto out;
 	} else if (UNLIKELY(p->f.fb.z < sizeof(struct dl_file_s))) {
 		goto out;
@@ -368,7 +368,7 @@ crea(const char *file, struct dl_spec_s sp)
 	munmap_fn(f);
 
 	/* now let pump() and resz() do the rest */
-	if ((res = pump(file)) == NULL) {
+	if ((res = pump(file, O_RDWR)) == NULL) {
 		/* nawww */
 		goto out;
 	} else if (resz(res, sp) < 0) {
@@ -1146,7 +1146,7 @@ cmd_init(struct glod_args_info argi[static 1])
 	} else if (!argi->resize_given && (m = crea(file, dim)) == NULL) {
 		fprintf(stderr, "error creating machine file `%s'\n", file);
 		res = 1;
-	} else if (argi->resize_given && (m = pump(file)) == NULL) {
+	} else if (argi->resize_given && (m = pump(file, O_RDWR)) == NULL) {
 		fprintf(stderr, "error loading machine file `%s'\n", file);
 		res = 1;
 	} else if (argi->resize_given && resz(m, dim) < 0) {
@@ -1172,7 +1172,7 @@ cmd_train(struct glod_args_info argi[static 1])
 		fputs("no machine file given\n", stderr);
 		res = 1;
 
-	} else if (UNLIKELY((m = pump(file)) == NULL)) {
+	} else if (UNLIKELY((m = pump(file, O_RDWR)) == NULL)) {
 		/* reading the machine file failed */
 		fprintf(stderr, "error opening machine file `%s'\n", file);
 		res = 1;
@@ -1233,7 +1233,7 @@ cmd_prop(struct glod_args_info argi[static 1])
 		fputs("no machine file given\n", stderr);
 		res = 1;
 
-	} else if (UNLIKELY((m = pump(file)) == NULL)) {
+	} else if (UNLIKELY((m = pump(file, O_RDONLY)) == NULL)) {
 		/* reading the machine file failed */
 		fprintf(stderr, "error opening machine file `%s'\n", file);
 		res = 1;
@@ -1279,7 +1279,7 @@ cmd_info(struct glod_args_info argi[static 1])
 		const char *f = argi->inputs[i];
 		dl_rbm_t m;
 
-		if ((m = pump(f)) == NULL) {
+		if ((m = pump(f, O_RDONLY)) == NULL) {
 			fprintf(stderr, "error opening machine file `%s'\n", f);
 			res = 1;
 		}
