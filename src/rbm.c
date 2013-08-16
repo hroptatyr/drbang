@@ -442,7 +442,7 @@ read_tf(const int fd)
 		if (UNLIKELY(i >= spsz)) {
 			/* extend vector */
 			size_t nu = spsz + 256U;
-			spsv = realloc(spsv, nu *= sizeof(*spsv));
+			spsv = realloc(spsv, nu * sizeof(*spsv));
 			spsz = nu;
 		}
 		/* assign index/value pair */
