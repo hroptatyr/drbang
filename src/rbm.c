@@ -24,7 +24,7 @@
 
 /* pick an implementation */
 #if !defined SALAKHUTDINOV && !defined GEHLER
-#define BINOM_INPUT	1
+#define SALAKHUTDINOV	1
 #endif	/* !SALAKHUTDINOV && !GEHLER */
 
 #if defined __INTEL_COMPILER
