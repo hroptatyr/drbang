@@ -453,15 +453,6 @@ read_tf(const int fd)
 	return (spsv_t){.z = i, .v = spsv};
 }
 
-static __attribute__((unused)) void
-popul_ui8(float *restrict x, const uint8_t *n, size_t z)
-{
-	for (size_t i = 0; i < z; i++) {
-		x[i] = (float)(int)n[i];
-	}
-	return;
-}
-
 static size_t
 popul_sv(float *restrict x, size_t z, const spsv_t sv)
 {
@@ -485,31 +476,6 @@ not populating entry %zu, machine's network too small\n", i);
 		x[i] = (float)(int)c;
 	}
 	return res;
-}
-
-static __attribute__((unused)) float
-poiss_lambda_ui8(const uint8_t *n, size_t z)
-{
-	/* N is the number of total incidents (occurence times count) */
-	long unsigned int N = 0UL;
-
-	/* calc N and n */
-	for (size_t i = 0; i < z; i++) {
-		N += n[i];
-	}
-	return (float)N / (float)z;
-}
-
-static __attribute__((unused)) float
-poiss_lambda_f(const float *v, size_t z)
-{
-	/* incident number */
-	long unsigned int N = 0UL;
-
-	for (size_t i = 0; i < z; i++) {
-		N += (long int)v[i];
-	}
-	return log((float)N) / (float)z;
 }
 
 
