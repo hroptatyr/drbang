@@ -283,7 +283,7 @@ resz(dl_rbm_t m, struct dl_spec_s nu)
 
 	/* compute new file size */
 	z = nu.nvis + nu.nhid + nu.nvis * nu.nhid;
-	ftruncate(ol_f.fd, fz = z * sizeof(float) + sizeof(nu));
+	ftruncate(ol_f.fd, fz = z * sizeof(float) + sizeof(struct dl_file_s));
 
 	if (UNLIKELY((nu_f.fb = mmap_fd(ol_f.fd, fz, pr, fl)).d == NULL)) {
 		res = -1;
