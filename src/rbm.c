@@ -24,7 +24,7 @@
 
 /* pick an implementation */
 #if !defined SALAKHUTDINOV && !defined GEHLER
-#define SALAKHUTDINOV	1
+#define BINOM_INPUT	1
 #endif	/* !SALAKHUTDINOV && !GEHLER */
 
 #if defined __INTEL_COMPILER
@@ -528,7 +528,9 @@ integ_layer(const float *x, size_t z)
 
 /* propagation, gibbs sampling and learning */
 /* global parameters */
+#if defined SALAKHUTDINOV
 static size_t N;
+#endif	/* SALAKHUTDINOV */
 
 static ni int
 prop_up(float *restrict h, dl_rbm_t m, const float vis[static m->nvis])
@@ -613,6 +615,10 @@ expt_vis(float *restrict v, dl_rbm_t m, const float vis[static m->nvis])
 	for (size_t i = 0; i < nvis; i++) {
 		v[i] = exp(vis[i]);
 	}
+#elif defined BINOM_INPUT
+	for (size_t i = 0; i < nvis; i++) {
+		v[i] = sigma(vis[i]);
+	}
 #endif	/* impls */
 	return 0;
 }
@@ -627,7 +633,11 @@ smpl_vis(float *restrict v, dl_rbm_t m, const float vis[static m->nvis])
 
 	/* vis is expected to contain the lambda values */
 	for (size_t i = 0; i < nvis; i++) {
+#if !defined BINOM_INPUT
 		v[i] = dr_rand_poiss(vis[i]);
+#else  /* BINOM_INPUT */
+		v[i] = dr_rand_binom1(vis[i]);
+#endif	/* !BINOM_INPUT */
 	}
 
 	DEBUG(dump_layer("Vs", vis, nvis));
@@ -959,7 +969,11 @@ train(drbctx_t ctx, struct spsv_s sv)
 	DEBUG(float *hs = calloc(nh, sizeof(*hs)));
 
 	/* populate from input */
+#if defined SALAKHUTDINOV
 	N = popul_sv(vo, nv, sv);
+#else  /* !SALAKHUTDINOV */
+	(void)popul_sv(vo, nv, sv);
+#endif	/* SALAKHUTDINOV */
 
 	/* vh gibbs */
 	prop_up(ho, m, vo);
@@ -1015,7 +1029,11 @@ prop(drbctx_t ctx, spsv_t sv, int smplp)
 	const size_t nh = m->nhid;
 
 	/* populate from input */
+#if defined SALAKHUTDINOV
 	N = popul_sv(vo, nv, sv);
+#else  /* !SALAKHUTDINOV */
+	(void)popul_sv(vo, nv, sv);
+#endif	/* SALAKHUTDINOV */
 
 	/* vh gibbs */
 	prop_up(ho, m, vo);
