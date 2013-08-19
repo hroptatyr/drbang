@@ -453,15 +453,6 @@ read_tf(const int fd)
 	return (spsv_t){.z = i, .v = spsv};
 }
 
-static __attribute__((unused)) void
-popul_ui8(float *restrict x, const uint8_t *n, size_t z)
-{
-	for (size_t i = 0; i < z; i++) {
-		x[i] = (float)(int)n[i];
-	}
-	return;
-}
-
 static size_t
 popul_sv(float *restrict x, size_t z, const spsv_t sv)
 {
@@ -485,31 +476,6 @@ not populating entry %zu, machine's network too small\n", i);
 		x[i] = (float)(int)c;
 	}
 	return res;
-}
-
-static __attribute__((unused)) float
-poiss_lambda_ui8(const uint8_t *n, size_t z)
-{
-	/* N is the number of total incidents (occurence times count) */
-	long unsigned int N = 0UL;
-
-	/* calc N and n */
-	for (size_t i = 0; i < z; i++) {
-		N += n[i];
-	}
-	return (float)N / (float)z;
-}
-
-static __attribute__((unused)) float
-poiss_lambda_f(const float *v, size_t z)
-{
-	/* incident number */
-	long unsigned int N = 0UL;
-
-	for (size_t i = 0; i < z; i++) {
-		N += (long int)v[i];
-	}
-	return log((float)N) / (float)z;
 }
 
 
@@ -562,7 +528,9 @@ integ_layer(const float *x, size_t z)
 
 /* propagation, gibbs sampling and learning */
 /* global parameters */
+#if defined SALAKHUTDINOV
 static size_t N;
+#endif	/* SALAKHUTDINOV */
 
 static ni int
 prop_up(float *restrict h, dl_rbm_t m, const float vis[static m->nvis])
@@ -647,6 +615,10 @@ expt_vis(float *restrict v, dl_rbm_t m, const float vis[static m->nvis])
 	for (size_t i = 0; i < nvis; i++) {
 		v[i] = exp(vis[i]);
 	}
+#elif defined BINOM_INPUT
+	for (size_t i = 0; i < nvis; i++) {
+		v[i] = sigma(vis[i]);
+	}
 #endif	/* impls */
 	return 0;
 }
@@ -661,7 +633,11 @@ smpl_vis(float *restrict v, dl_rbm_t m, const float vis[static m->nvis])
 
 	/* vis is expected to contain the lambda values */
 	for (size_t i = 0; i < nvis; i++) {
+#if !defined BINOM_INPUT
 		v[i] = dr_rand_poiss(vis[i]);
+#else  /* BINOM_INPUT */
+		v[i] = dr_rand_binom1(vis[i]);
+#endif	/* !BINOM_INPUT */
 	}
 
 	DEBUG(dump_layer("Vs", vis, nvis));
@@ -993,7 +969,11 @@ train(drbctx_t ctx, struct spsv_s sv)
 	DEBUG(float *hs = calloc(nh, sizeof(*hs)));
 
 	/* populate from input */
+#if defined SALAKHUTDINOV
 	N = popul_sv(vo, nv, sv);
+#else  /* !SALAKHUTDINOV */
+	(void)popul_sv(vo, nv, sv);
+#endif	/* SALAKHUTDINOV */
 
 	/* vh gibbs */
 	prop_up(ho, m, vo);
@@ -1049,7 +1029,11 @@ prop(drbctx_t ctx, spsv_t sv, int smplp)
 	const size_t nh = m->nhid;
 
 	/* populate from input */
+#if defined SALAKHUTDINOV
 	N = popul_sv(vo, nv, sv);
+#else  /* !SALAKHUTDINOV */
+	(void)popul_sv(vo, nv, sv);
+#endif	/* SALAKHUTDINOV */
 
 	/* vh gibbs */
 	prop_up(ho, m, vo);
