@@ -63,7 +63,7 @@ libdrbang_a_SOURCES += rand-ziggurat.c rand-ziggurat.h
 libdrbang_a_SOURCES += maths.c maths.h
 libdrbang_a_SOURCES += version.c version.h
 
-noinst_PROGRAMS += rbm
+bin_PROGRAMS += rbm
 rbm_SOURCES = rbm.c
 rbm_SOURCES += rbm.ggo
 rbm_CPPFLAGS = $(AM_CPPFLAGS)
