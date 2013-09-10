@@ -71,11 +71,13 @@ rbm_CPPFLAGS += -D_GNU_SOURCE
 rbm_LDFLAGS = $(AM_LDFLAGS)
 rbm_LDFLAGS += -static
 rbm_LDADD = libdrbang.a
+rbm_LDADD += -lm
 BUILT_SOURCES += rbm.x rbm.xh
 
 noinst_PROGRAMS += rand-test
 rand_test_LDFLAGS = $(AM_LDFLAGS) -static
 rand_test_LDADD = libdrbang.a
+rand_test_LDADD += -lm
 
 
 version.c: version.c.in $(top_builddir)/version.mk
