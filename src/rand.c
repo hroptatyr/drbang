@@ -67,6 +67,10 @@ static int _egd_sock = -1;
 static int _urnd_sock = -1;
 #endif
 
+#if defined __INTEL_COMPILER
+# define auto		static
+#endif	/* __INTEL_COMPILER */
+
 #if !defined UNLIKELY
 # define UNLIKELY(x)	(__builtin_expect(x, 0))
 #endif	/* !UNLIKELY */
@@ -461,7 +465,7 @@ dr_rand_gamma(float k)
  *
  * gsl's take on it. */
 
-	static float gamma_large(float k)
+	auto float gamma_large(float k)
 	{
 		const float third = 1.f / 3.f;
 		float d = k - third;
@@ -492,7 +496,7 @@ dr_rand_gamma(float k)
 		return d * v;
 	}
 
-	static float gamma_small(float k)
+	auto float gamma_small(float k)
 	{
 		float u;
 		float scal;
@@ -512,7 +516,7 @@ dr_rand_gamma(float k)
 float
 dr_rand_poiss(float lambda)
 {
-	static float poiss_rnd_small(float lambda)
+	auto float poiss_rnd_small(float lambda)
 	{
 		const float lexp = exp(-lambda);
 		float p = 1.f;
@@ -524,7 +528,7 @@ dr_rand_poiss(float lambda)
 		return (float)k;
 	}
 
-	static float poiss_rnd_ad(float lambda)
+	auto float poiss_rnd_ad(float lambda)
 	{
 		/* Ahrens/Dieter algo */
 		const float m = floor(7.f / 8.f * lambda);
