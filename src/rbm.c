@@ -64,6 +64,7 @@
 
 #if defined __INTEL_COMPILER
 # pragma warning (disable:1911)
+# define auto		static
 #endif	/* __INTEL_COMPILER */
 
 #define PI		3.141592654f
@@ -893,7 +894,7 @@ update_b(drbctx_t ctx)
 	const size_t nh = m->nhid;
 
 	/* the real update routine is here, called twice, for vb and hb */
-	static void __upd(
+	auto void __upd(
 		float *restrict b, float *restrict db,
 		const float *o, const float *r, const size_t z)
 	{
@@ -1216,7 +1217,7 @@ cmd_train(struct glod_args_info argi[static 1])
 		size_t i = 0;
 
 		/* set up C-c handling (dirtee) */
-		static __attribute__((noreturn)) void si_train(int UNUSED(sig))
+		auto __attribute__((noreturn)) void si_train(int UNUSED(sig))
 		{
 			longjmp(jb, 1U);
 		}
@@ -1276,7 +1277,7 @@ cmd_prop(struct glod_args_info argi[static 1])
 		const int smplp = argi->sample_given;
 
 		/* set up the C-c handler */
-		static __attribute__((noreturn)) void si_prop(int UNUSED(sig))
+		auto __attribute__((noreturn)) void si_prop(int UNUSED(sig))
 		{
 			longjmp(jb, 2U);
 		}
